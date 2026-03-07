@@ -3,6 +3,9 @@
 
 This is intentionally restrictive but not a perfect security boundary. For strong
 isolation, run Yahoohoo itself inside a container/VM.
+
+Supports RLM-style llm_query(): sandbox code can call back to the host LLM
+via a stdin/stdout JSON protocol with the Node parent process.
 """
 
 from __future__ import annotations
@@ -99,6 +102,51 @@ SAFE_BUILTINS = {
     "tuple": tuple,
     "zip": zip,
 }
+
+
+# ── RLM Protocol ──────────────────────────────────────────────────────
+# When llm_query() is called from sandbox code, the runner writes a JSON
+# request to FD 3 (a dedicated pipe) and reads the response from stdin.
+# This avoids mixing llm_query protocol messages with the final result
+# on stdout.
+#
+# Request (written to fd 3):  {"type":"llm_query","id":<int>,"prompt":<str>}
+# Response (read from stdin): {"type":"llm_response","id":<int>,"text":<str>}
+# Final result (stdout):      {"ok":true,"result":...}
+
+_llm_query_counter = 0
+_llm_pipe = None  # Set to fd 3 file object in main() if available
+_llm_enabled = False
+_llm_max_calls = 10  # prevent runaway recursion
+
+
+def _llm_query(prompt: str) -> str:
+    """Call back to the host LLM via the parent Node process."""
+    global _llm_query_counter
+
+    if not _llm_enabled:
+        return "[llm_query unavailable: host does not support sampling]"
+
+    if _llm_query_counter >= _llm_max_calls:
+        return f"[llm_query limit reached: max {_llm_max_calls} calls per sandbox run]"
+
+    _llm_query_counter += 1
+    req = {"type": "llm_query", "id": _llm_query_counter, "prompt": prompt}
+
+    try:
+        _llm_pipe.write(json.dumps(req) + "\n")
+        _llm_pipe.flush()
+
+        # Read response from stdin (Node writes it there)
+        line = sys.stdin.readline()
+        if not line:
+            return "[llm_query error: no response from host]"
+        resp = json.loads(line)
+        if resp.get("type") == "llm_response" and resp.get("id") == _llm_query_counter:
+            return resp.get("text", "")
+        return f"[llm_query error: unexpected response: {line[:200]}]"
+    except Exception as e:
+        return f"[llm_query error: {e}]"
 
 
 def fail(message: str, *, detail: str | None = None, exit_code: int = 1) -> None:
@@ -202,6 +250,8 @@ def make_importer(settings: dict):
 
 
 def main() -> None:
+    global _llm_pipe, _llm_enabled
+
     if len(sys.argv) != 2:
         fail("Usage: runner.py <payload.json>")
 
@@ -209,6 +259,18 @@ def main() -> None:
     code = payload.get("code", "")
     data = payload.get("input_data", {})
     settings = payload.get("settings", {})
+
+    # Try to open fd 3 for llm_query protocol
+    try:
+        import os
+        _llm_pipe = os.fdopen(3, "w", encoding="utf-8")
+        _llm_enabled = True
+        # Also reopen stdin for reading responses
+        sys.stdin = io.TextIOWrapper(
+            os.fdopen(0, "rb", 0), encoding="utf-8", newline="\n"
+        )
+    except Exception:
+        _llm_enabled = False
 
     if not isinstance(code, str) or not code.strip():
         fail("Payload is missing executable Python code.")
@@ -240,6 +302,7 @@ def main() -> None:
         "statistics": statistics,
         "json": json,
         "RESULT": None,
+        "llm_query": _llm_query,
     }
 
     stdout_buffer = io.StringIO()
@@ -261,6 +324,7 @@ def main() -> None:
         "result": result,
         "stdout": stdout_buffer.getvalue()[: settings.get("max_output_bytes", 200_000)],
         "stderr": stderr_buffer.getvalue()[: settings.get("max_output_bytes", 200_000)],
+        "llm_calls": _llm_query_counter,
     }
     sys.stdout.write(json.dumps(payload, default=convert))
 

@@ -68,6 +68,7 @@ export function loadConfig(overrides = {}) {
       allowNumpy: envBool('YAHOOHOO_SANDBOX_ALLOW_NUMPY', true),
       allowPandas: envBool('YAHOOHOO_SANDBOX_ALLOW_PANDAS', true),
       strictFileIsolation: envBool('YAHOOHOO_SANDBOX_STRICT_FILES', false),
+      enableLlmQuery: envBool('YAHOOHOO_LLM_QUERY', true),
     },
     auth: {
       apiKeys: envList('YAHOOHOO_API_KEYS', []),

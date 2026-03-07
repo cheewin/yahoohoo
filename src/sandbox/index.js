@@ -2,6 +2,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
+import { createReadStream } from 'node:fs';
 import { stableStringify } from '../lib/json.js';
 import { startTimer } from '../lib/logger.js';
 import { SandboxError, SandboxTimeoutError } from '../lib/errors.js';
@@ -13,7 +14,7 @@ export class PythonSandbox {
     this.runnerPath = path.resolve(path.dirname(new URL(import.meta.url).pathname), 'runner.py');
   }
 
-  async run({ code, inputData, metadata = {} }) {
+  async run({ code, inputData, metadata = {}, samplingFn }) {
     const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'yahoohoo-'));
     const payloadPath = path.join(tempDir, 'payload.json');
     const payload = {
@@ -34,7 +35,7 @@ export class PythonSandbox {
 
     try {
       const timer = startTimer();
-      const result = await this.#spawn(payloadPath, tempDir);
+      const result = await this.#spawn(payloadPath, tempDir, samplingFn);
       const ms = timer.elapsedMs();
       this.logger.debug(`Sandbox completed in ${ms.toFixed(0)}ms`, metadata);
       result._timing = { sandboxMs: Math.round(ms) };
@@ -44,8 +45,9 @@ export class PythonSandbox {
     }
   }
 
-  #spawn(payloadPath, cwd) {
+  #spawn(payloadPath, cwd, samplingFn) {
     return new Promise((resolve, reject) => {
+      // Create child with fd 3 as a pipe for llm_query requests
       const child = spawn(this.config.sandbox.pythonCommand, [this.runnerPath, payloadPath], {
         cwd,
         env: {
@@ -53,7 +55,7 @@ export class PythonSandbox {
           PYTHONNOUSERSITE: '1',
           PYTHONPATH: '',
         },
-        stdio: ['ignore', 'pipe', 'pipe'],
+        stdio: ['pipe', 'pipe', 'pipe', 'pipe'], // stdin, stdout, stderr, fd3 (llm_query pipe)
       });
 
       let stdout = '';
@@ -75,6 +77,44 @@ export class PythonSandbox {
       child.stderr.on('data', (chunk) => {
         stderr += chunk;
       });
+
+      // Handle llm_query requests from Python via fd 3
+      if (child.stdio[3]) {
+        const fd3 = child.stdio[3];
+        fd3.setEncoding('utf-8');
+        let fd3Buffer = '';
+        fd3.on('data', async (chunk) => {
+          fd3Buffer += chunk;
+          // Process complete lines
+          let newlineIdx;
+          while ((newlineIdx = fd3Buffer.indexOf('\n')) !== -1) {
+            const line = fd3Buffer.slice(0, newlineIdx);
+            fd3Buffer = fd3Buffer.slice(newlineIdx + 1);
+            if (!line.trim()) continue;
+            try {
+              const req = JSON.parse(line);
+              if (req.type === 'llm_query' && samplingFn) {
+                const responseText = await samplingFn(req.prompt);
+                const resp = JSON.stringify({ type: 'llm_response', id: req.id, text: responseText }) + '\n';
+                child.stdin.write(resp);
+              } else {
+                // No sampling available — return error
+                const resp = JSON.stringify({ type: 'llm_response', id: req.id, text: '[llm_query unavailable: no sampling function provided]' }) + '\n';
+                child.stdin.write(resp);
+              }
+            } catch (err) {
+              this.logger.warn('llm_query protocol error:', err.message);
+              try {
+                const resp = JSON.stringify({ type: 'llm_response', id: 0, text: `[llm_query error: ${err.message}]` }) + '\n';
+                child.stdin.write(resp);
+              } catch {
+                // stdin may be closed
+              }
+            }
+          }
+        });
+      }
+
       child.on('error', (error) => {
         clearTimeout(timer);
         reject(error);

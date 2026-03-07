@@ -4,6 +4,7 @@ import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { PythonSandbox } from '../../src/sandbox/index.js';
 
 const RUNNER = path.resolve('src/sandbox/runner.py');
 
@@ -535,6 +536,96 @@ describe('sandbox runner', () => {
       // Correlation matrix for multi-symbol
       assert.ok(result.result.correlation_matrix);
       assert.ok(result.result.correlation_matrix.AAPL_vs_MSFT != null);
+    });
+  });
+
+  describe('llm_query (RLM)', () => {
+    const logger = { debug() {}, info() {}, warn() {}, error() {} };
+    const config = {
+      sandbox: {
+        pythonCommand: 'python3',
+        timeoutMs: 15000,
+        cpuSeconds: 10,
+        memoryMb: 512,
+        maxOutputBytes: 200000,
+        allowNumpy: true,
+        allowPandas: true,
+        strictFileIsolation: false,
+      },
+    };
+
+    it('calls llm_query and receives response from sampling function', async () => {
+      const sandbox = new PythonSandbox({ config, logger });
+      const calls = [];
+      const samplingFn = async (prompt) => {
+        calls.push(prompt);
+        return 'The answer is 42.';
+      };
+
+      const result = await sandbox.run({
+        code: `
+response = llm_query("What is the meaning of life?")
+RESULT = {"llm_said": response}
+`,
+        inputData: {},
+        samplingFn,
+      });
+
+      assert.equal(result.ok, true);
+      assert.equal(result.result.llm_said, 'The answer is 42.');
+      assert.equal(result.llm_calls, 1);
+      assert.equal(calls.length, 1);
+      assert.ok(calls[0].includes('meaning of life'));
+    });
+
+    it('handles multiple llm_query calls', async () => {
+      const sandbox = new PythonSandbox({ config, logger });
+      let callCount = 0;
+      const samplingFn = async (prompt) => {
+        callCount++;
+        return `Response ${callCount}: ${prompt.slice(0, 20)}`;
+      };
+
+      const result = await sandbox.run({
+        code: `
+r1 = llm_query("first question")
+r2 = llm_query("second question")
+RESULT = {"r1": r1, "r2": r2}
+`,
+        inputData: {},
+        samplingFn,
+      });
+
+      assert.equal(result.ok, true);
+      assert.ok(result.result.r1.startsWith('Response 1'));
+      assert.ok(result.result.r2.startsWith('Response 2'));
+      assert.equal(result.llm_calls, 2);
+    });
+
+    it('works without sampling function (graceful degradation)', async () => {
+      const sandbox = new PythonSandbox({ config, logger });
+
+      const result = await sandbox.run({
+        code: `
+response = llm_query("test prompt")
+RESULT = {"llm_said": response}
+`,
+        inputData: {},
+        // no samplingFn
+      });
+
+      assert.equal(result.ok, true);
+      assert.ok(result.result.llm_said.includes('unavailable'));
+    });
+
+    it('sandbox programs still work through PythonSandbox class', async () => {
+      const sandbox = new PythonSandbox({ config, logger });
+      const result = await sandbox.run({
+        code: 'RESULT = {"answer": DATA["x"] + DATA["y"]}',
+        inputData: { x: 3, y: 7 },
+      });
+      assert.equal(result.ok, true);
+      assert.equal(result.result.answer, 10);
     });
   });
 

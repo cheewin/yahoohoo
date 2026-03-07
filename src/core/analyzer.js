@@ -1,3 +1,5 @@
+import { execFileSync, execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import { buildAnalysisPlan, computeConfidence, extractTickerCandidates, makeChildQuestions, renderDeterministicNarrative } from './heuristics.js';
 import { classifyIntent } from './intents.js';
 import { programForIntent } from './programs.js';
@@ -176,6 +178,24 @@ export class RecursiveMarketAnalyzer {
     // Progress: sandbox execution started
     await emitProgress(ctx, { progress: 1, total: totalSteps, message: `Running ${plan.program.name} sandbox program…` });
 
+    // Build sampling callback for RLM-style llm_query() in sandbox.
+    // Priority: MCP sampling > claude CLI > unavailable
+    const samplingFn = ctx?.mcpReq?.requestSampling
+      ? async (prompt) => {
+          try {
+            const response = await ctx.mcpReq.requestSampling({
+              messages: [{ role: 'user', content: { type: 'text', text: prompt } }],
+              maxTokens: this.config.recursion.samplingMaxTokens,
+              temperature: this.config.recursion.samplingTemperature,
+            });
+            const { flattenSamplingContent } = await import('./sampling.js');
+            return flattenSamplingContent(response);
+          } catch (err) {
+            return `[sampling error: ${err.message}]`;
+          }
+        }
+      : this.#makeClaudeFallback();
+
     let sandboxResult;
     try {
       sandboxResult = await this.sandbox.run({
@@ -188,6 +208,7 @@ export class RecursiveMarketAnalyzer {
           intent: plan.intent.primary,
           program: plan.program.name,
         },
+        samplingFn,
       });
     } catch (error) {
       this.logger.warn(`Sandbox execution failed at depth ${depth}:`, error.message);
@@ -220,6 +241,7 @@ export class RecursiveMarketAnalyzer {
               code: plan.program.code,
               inputData: tfInput,
               metadata: { query, symbols: resolvedSymbols, depth, intent: plan.intent.primary, program: plan.program.name, timeframe: tf.label },
+              samplingFn,
             });
             if (tfResult.ok) extras.push({ label: tf.label, result: tfResult.result });
           } catch (err) {
@@ -323,6 +345,31 @@ export class RecursiveMarketAnalyzer {
 
     node.confidence = computeConfidence(node);
     return node;
+  }
+
+  #makeClaudeFallback() {
+    if (!this.config.sandbox.enableLlmQuery) return null;
+    // Check if `claude` CLI is available
+    try {
+      execFileSync('claude', ['--version'], { stdio: 'ignore', timeout: 3000 });
+    } catch {
+      this.logger.debug('claude CLI not found, llm_query disabled');
+      return null;
+    }
+    this.logger.debug('claude CLI available, llm_query enabled (on-device mode)');
+    return async (prompt) => {
+      try {
+        const exec = promisify(execFile);
+        const { stdout } = await exec('claude', ['-p', prompt], {
+          timeout: 30_000,
+          maxBuffer: 1024 * 1024,
+          env: { ...process.env, NO_COLOR: '1' },
+        });
+        return stdout.trim();
+      } catch (err) {
+        return `[claude error: ${err.message}]`;
+      }
+    };
   }
 
   async #resolveSymbols(query, providedSymbols = []) {
