@@ -1,0 +1,40 @@
+{
+  "name": "yahoohoo",
+  "version": "0.1.0",
+  "description": "Yahoo Finance MCP server with sandboxed recursive market analysis using host-provided MCP sampling.",
+  "type": "module",
+  "main": "src/index.js",
+  "bin": {
+    "yahoohoo": "src/index.js"
+  },
+  "scripts": {
+    "start": "node src/index.js",
+    "stdio": "node src/index.js --transport stdio",
+    "http": "node src/index.js --transport http",
+    "check": "node -e \"const g=require('node:fs').globSync('src/**/*.js');for(const f of g){require('node:child_process').execFileSync(process.execPath,['--check',f],{stdio:'inherit'})}\"",
+    "test": "node --test test/*.test.js test/**/*.test.js",
+    "test:live": "YAHOOHOO_TEST_LIVE=1 node --test test/*.test.js test/**/*.test.js",
+    "smoke:sandbox": "python3 src/sandbox/runner.py examples/sandbox-payload.json"
+  },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "yahoo-finance",
+    "finance",
+    "stocks",
+    "market-data",
+    "sandbox",
+    "agentic"
+  ],
+  "author": "OpenAI for Hunter Bown",
+  "license": "MIT",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.27.1",
+    "express": "^5.1.0",
+    "yahoo-finance2": "^3.13.2",
+    "zod": "^4.3.6"
+  },
+  "engines": {
+    "node": ">=22.0.0"
+  }
+}

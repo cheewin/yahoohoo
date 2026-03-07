@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "yahoohoo": {
+      "command": "node",
+      "args": [
+        "/ABS/PATH/TO/yahoohoo/src/index.js",
+        "--transport",
+        "stdio"
+      ],
+      "env": {}
+    }
+  }
+}

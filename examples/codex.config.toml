@@ -1,0 +1,4 @@
+[mcp_servers.yahoohoo]
+command = "node"
+args = ["/ABS/PATH/TO/yahoohoo/src/index.js", "--transport", "stdio"]
+cwd = "/ABS/PATH/TO/yahoohoo"

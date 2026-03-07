@@ -1,0 +1,9 @@
+.DS_Store
+.git
+.github
+node_modules
+npm-debug.log*
+test
+docs
+examples
+CLAUDE.md

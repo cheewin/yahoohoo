@@ -1,0 +1,42 @@
+{
+  "code": null,
+  "input_data": {
+    "symbols": ["AAPL", "MSFT"],
+    "benchmark": "SPY",
+    "quotes": {
+      "AAPL": {"symbol": "AAPL", "regularMarketPrice": 180.0},
+      "MSFT": {"symbol": "MSFT", "regularMarketPrice": 400.0},
+      "SPY": {"symbol": "SPY", "regularMarketPrice": 500.0}
+    },
+    "history": {
+      "AAPL": [
+        {"date": "2026-01-01T00:00:00Z", "close": 170, "volume": 1000000},
+        {"date": "2026-01-02T00:00:00Z", "close": 172, "volume": 1100000},
+        {"date": "2026-01-03T00:00:00Z", "close": 168, "volume": 900000},
+        {"date": "2026-01-06T00:00:00Z", "close": 175, "volume": 1200000},
+        {"date": "2026-01-07T00:00:00Z", "close": 180, "volume": 1300000}
+      ],
+      "MSFT": [
+        {"date": "2026-01-01T00:00:00Z", "close": 390, "volume": 500000},
+        {"date": "2026-01-02T00:00:00Z", "close": 395, "volume": 550000},
+        {"date": "2026-01-03T00:00:00Z", "close": 385, "volume": 450000},
+        {"date": "2026-01-06T00:00:00Z", "close": 398, "volume": 600000},
+        {"date": "2026-01-07T00:00:00Z", "close": 400, "volume": 620000}
+      ],
+      "SPY": [
+        {"date": "2026-01-01T00:00:00Z", "close": 490, "volume": 2000000},
+        {"date": "2026-01-02T00:00:00Z", "close": 492, "volume": 2100000},
+        {"date": "2026-01-03T00:00:00Z", "close": 488, "volume": 1900000},
+        {"date": "2026-01-06T00:00:00Z", "close": 495, "volume": 2200000},
+        {"date": "2026-01-07T00:00:00Z", "close": 500, "volume": 2300000}
+      ]
+    },
+    "summaries": {},
+    "options": {}
+  },
+  "settings": {
+    "cpu_seconds": 5,
+    "memory_mb": 256,
+    "max_output_bytes": 50000
+  }
+}

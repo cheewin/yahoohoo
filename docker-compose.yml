@@ -1,0 +1,24 @@
+services:
+  yahoohoo:
+    build: .
+    ports:
+      - "${YAHOOHOO_PORT:-3434}:3434"
+    environment:
+      - YAHOOHOO_TRANSPORT=http
+      - YAHOOHOO_HOST=0.0.0.0
+      - YAHOOHOO_PORT=3434
+      - YAHOOHOO_API_KEYS=${YAHOOHOO_API_KEYS:-}
+      - YAHOOHOO_RATE_LIMIT=${YAHOOHOO_RATE_LIMIT:-60}
+      - YAHOOHOO_MAX_SESSIONS=${YAHOOHOO_MAX_SESSIONS:-50}
+      - YAHOOHOO_MAX_SAVED_RUNS=${YAHOOHOO_MAX_SAVED_RUNS:-100}
+      - YAHOOHOO_DRAIN_TIMEOUT_MS=${YAHOOHOO_DRAIN_TIMEOUT_MS:-10000}
+      - YAHOOHOO_LOG_LEVEL=${YAHOOHOO_LOG_LEVEL:-info}
+      - YAHOOHOO_SANDBOX_TIMEOUT_MS=${YAHOOHOO_SANDBOX_TIMEOUT_MS:-20000}
+      - YAHOOHOO_DATA_PROVIDER=${YAHOOHOO_DATA_PROVIDER:-yahoo}
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3434/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3

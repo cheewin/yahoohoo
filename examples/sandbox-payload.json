@@ -1,0 +1,18 @@
+{
+  "code": "RESULT = {'sum': sum([row['close'] for row in DATA['history']['TEST']]), 'count': len(DATA['history']['TEST'])}",
+  "input_data": {
+    "history": {
+      "TEST": [
+        {"date": "2026-03-01T00:00:00Z", "close": 10},
+        {"date": "2026-03-02T00:00:00Z", "close": 12}
+      ]
+    }
+  },
+  "settings": {
+    "cpu_seconds": 5,
+    "memory_mb": 256,
+    "max_output_bytes": 10000,
+    "allow_numpy": true,
+    "allow_pandas": true
+  }
+}

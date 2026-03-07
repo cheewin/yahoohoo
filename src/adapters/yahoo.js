@@ -1,0 +1,171 @@
+import YahooFinance from 'yahoo-finance2';
+import { TtlCache } from '../lib/cache.js';
+import { stableStringify } from '../lib/json.js';
+import { MarketDataProvider } from './base.js';
+
+function key(parts) {
+  return stableStringify(parts, 0);
+}
+
+function compactQuote(quote) {
+  return {
+    symbol: quote.symbol,
+    shortName: quote.shortName || quote.longName || null,
+    currency: quote.currency || null,
+    exchange: quote.fullExchangeName || quote.exchange || null,
+    regularMarketPrice: quote.regularMarketPrice ?? null,
+    regularMarketChange: quote.regularMarketChange ?? null,
+    regularMarketChangePercent: quote.regularMarketChangePercent ?? null,
+    regularMarketTime: quote.regularMarketTime ?? null,
+    marketState: quote.marketState ?? null,
+    fiftyTwoWeekHigh: quote.fiftyTwoWeekHigh ?? null,
+    fiftyTwoWeekLow: quote.fiftyTwoWeekLow ?? null,
+    marketCap: quote.marketCap ?? null,
+    trailingPE: quote.trailingPE ?? null,
+    forwardPE: quote.forwardPE ?? null,
+    averageDailyVolume3Month: quote.averageDailyVolume3Month ?? null,
+  };
+}
+
+function compactBar(bar) {
+  return {
+    date: bar.date instanceof Date ? bar.date.toISOString() : bar.date,
+    open: bar.open ?? null,
+    high: bar.high ?? null,
+    low: bar.low ?? null,
+    close: bar.close ?? null,
+    volume: bar.volume ?? null,
+    adjClose: bar.adjclose ?? bar.adjClose ?? null,
+  };
+}
+
+function compactSummary(summary) {
+  return {
+    symbol: summary.symbol || summary.price?.symbol || null,
+    price: summary.price || null,
+    summaryDetail: summary.summaryDetail || null,
+    financialData: summary.financialData || null,
+    defaultKeyStatistics: summary.defaultKeyStatistics || null,
+    calendarEvents: summary.calendarEvents || null,
+    assetProfile: summary.assetProfile || null,
+  };
+}
+
+function compactSearch(result, limit = 10) {
+  const quotes = Array.isArray(result?.quotes) ? result.quotes : [];
+  return quotes.slice(0, limit).map((item) => ({
+    symbol: item.symbol,
+    shortname: item.shortname || item.longname || item.name || null,
+    exchange: item.exchange || item.exchDisp || null,
+    quoteType: item.quoteType || null,
+    score: item.score ?? null,
+    isYahooFinance: item.isYahooFinance ?? true,
+  }));
+}
+
+function compactOptions(result) {
+  const calls = Array.isArray(result?.calls) ? result.calls : [];
+  const puts = Array.isArray(result?.puts) ? result.puts : [];
+  return {
+    underlyingSymbol: result?.underlyingSymbol || result?.symbol || null,
+    expirationDates: Array.isArray(result?.expirationDates)
+      ? result.expirationDates.map((d) => (d instanceof Date ? d.toISOString().slice(0, 10) : d))
+      : [],
+    strikes: Array.isArray(result?.strikes) ? result.strikes.slice(0, 50) : [],
+    calls: calls.slice(0, 40),
+    puts: puts.slice(0, 40),
+    quote: result?.quote || null,
+  };
+}
+
+export class YahooMarketData extends MarketDataProvider {
+  constructor({ cacheTtlMs, logger }) {
+    super();
+    this.logger = logger;
+    this.cache = new TtlCache(cacheTtlMs);
+    this.yf = new YahooFinance({
+      suppressNotices: ['yahooSurvey'],
+      validation: {
+        logErrors: false,
+      },
+    });
+  }
+
+  async search(query, limit = 10) {
+    return this.cache.memo(key(['search', query, limit]), async () => {
+      this.logger.debug('Yahoo search', query);
+      try {
+        const result = await this.yf.search(query);
+        return compactSearch(result, limit);
+      } catch (error) {
+        this.logger.warn(`Yahoo search failed for "${query}":`, error.message);
+        return [];
+      }
+    });
+  }
+
+  async quote(symbols) {
+    const uniqueSymbols = [...new Set(symbols.map((symbol) => symbol.toUpperCase()))];
+    return this.cache.memo(key(['quote', uniqueSymbols]), async () => {
+      const rows = await Promise.allSettled(
+        uniqueSymbols.map(async (symbol) => {
+          const result = await this.yf.quote(symbol);
+          return compactQuote(result);
+        }),
+      );
+      const entries = [];
+      for (let i = 0; i < uniqueSymbols.length; i++) {
+        const outcome = rows[i];
+        if (outcome.status === 'fulfilled' && outcome.value) {
+          entries.push([outcome.value.symbol || uniqueSymbols[i], outcome.value]);
+        } else {
+          this.logger.warn(`Yahoo quote failed for ${uniqueSymbols[i]}:`, outcome.reason?.message);
+          entries.push([uniqueSymbols[i], { symbol: uniqueSymbols[i], error: outcome.reason?.message || 'unknown error' }]);
+        }
+      }
+      return Object.fromEntries(entries);
+    });
+  }
+
+  async historical(symbol, { from, to, interval }) {
+    return this.cache.memo(key(['historical', symbol, from, to, interval]), async () => {
+      try {
+        const result = await this.yf.chart(symbol, {
+          period1: from,
+          period2: to,
+          interval,
+        });
+        return (Array.isArray(result?.quotes) ? result.quotes : []).map(compactBar);
+      } catch (error) {
+        this.logger.warn(`Yahoo chart failed for ${symbol}:`, error.message);
+        return [];
+      }
+    });
+  }
+
+  async quoteSummary(symbol, modules) {
+    return this.cache.memo(key(['summary', symbol, modules]), async () => {
+      try {
+        const result = await this.yf.quoteSummary(symbol, {
+          modules,
+        });
+        return compactSummary(result);
+      } catch (error) {
+        this.logger.warn(`Yahoo quoteSummary failed for ${symbol}:`, error.message);
+        return {};
+      }
+    });
+  }
+
+  async options(symbol, date) {
+    return this.cache.memo(key(['options', symbol, date]), async () => {
+      try {
+        const result = await this.yf.options(symbol, date ? { date } : undefined);
+        return compactOptions(result);
+      } catch (error) {
+        this.logger.warn(`Yahoo options failed for ${symbol}:`, error.message);
+        return { underlyingSymbol: symbol, expirationDates: [], strikes: [], calls: [], puts: [], quote: null };
+      }
+    });
+  }
+}
