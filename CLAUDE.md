@@ -11,7 +11,7 @@ Yahoohoo is an MCP server for market-data analysis. It combines Yahoo Finance da
 ```bash
 npm install                # install dependencies (Node 22+)
 npm run check              # syntax-check all source files
-npm test                   # run full test suite (209 deterministic tests, no network)
+npm test                   # run full test suite (213 deterministic tests, no network)
 npm run test:live          # run tests including live Yahoo Finance integration (184 total)
 npm run smoke:sandbox      # run sandbox smoke test via Python
 node src/index.js --transport stdio   # start in stdio mode

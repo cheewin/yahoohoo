@@ -90,6 +90,27 @@ Yahoo Finance also handles crypto symbols directly (`BTC-USD`, `ETH-USD`) for qu
 
 The analysis engine classifies intent (comparison, risk, options, fundamentals, macro), selects a specialized Python program, fetches data, runs computation in a sandboxed subprocess, and optionally decomposes into child analyses. Results stay server-side; the host gets a compact summary and navigates deeper with `yahoohoo_peek`.
 
+## `llm_query()` — LLM sub-calls from the sandbox
+
+Sandbox Python code can call `llm_query("prompt")` to invoke an LLM mid-computation ([RLM pattern](https://arxiv.org/abs/2512.24601)). Yahoohoo auto-detects which CLI is installed and uses it:
+
+| CLI | Command | Install |
+|-----|---------|---------|
+| Claude | `claude -p "prompt"` | [claude.ai/code](https://claude.ai/code) |
+| Codex | `codex exec "prompt"` | [github.com/openai/codex](https://github.com/openai/codex) |
+| Gemini | `gemini -p "prompt"` | [github.com/google-gemini/gemini-cli](https://github.com/google-gemini/gemini-cli) |
+| Copilot | `copilot -p -s "prompt"` | [github.com/github/copilot-cli](https://github.com/github/copilot-cli) |
+
+Auto-detection order: claude → codex → gemini → copilot. Override with:
+
+```bash
+YAHOOHOO_LLM_CLI=gemini    # force a specific CLI
+YAHOOHOO_LLM_CLI=auto      # auto-detect (default)
+YAHOOHOO_LLM_QUERY=false   # disable entirely
+```
+
+This is on-device only — the CLI runs locally on your machine. It doesn't work from remote MCP hosts like Claude Desktop or ChatGPT.
+
 ## Example
 
 ```
@@ -135,7 +156,7 @@ Pairwise:
 ## Development
 
 ```bash
-npm test               # 209 deterministic tests, no network
+npm test               # 213 deterministic tests, no network
 npm run test:live      # includes live Yahoo Finance integration
 npm run smoke:sandbox  # smoke test the Python sandbox
 ```

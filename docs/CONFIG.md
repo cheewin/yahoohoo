@@ -25,6 +25,8 @@ All configuration is via environment variables. No config files.
 | `YAHOOHOO_SANDBOX_TIMEOUT_MS` | `20000` | Sandbox execution timeout |
 | `YAHOOHOO_SANDBOX_CPU_SECONDS` | `10` | Max CPU seconds |
 | `YAHOOHOO_SANDBOX_MEMORY_MB` | `512` | Max memory for sandbox |
+| `YAHOOHOO_LLM_QUERY` | `true` | Enable `llm_query()` in sandbox via CLI fallback |
+| `YAHOOHOO_LLM_CLI` | `auto` | Which CLI for `llm_query()`: `auto`, `claude`, `codex`, `gemini`, `copilot` |
 | `YAHOOHOO_DRAIN_TIMEOUT_MS` | `10000` | Graceful shutdown drain timeout |
 | `YAHOOHOO_MAX_SAVED_RUNS` | `100` | Max saved analysis runs |
 | `YAHOOHOO_LOG_LEVEL` | `info` | Log level: `debug`, `info`, `warn`, `error` |

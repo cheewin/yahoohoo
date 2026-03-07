@@ -194,7 +194,7 @@ export class RecursiveMarketAnalyzer {
             return `[sampling error: ${err.message}]`;
           }
         }
-      : this.#makeClaudeFallback();
+      : this.#makeLlmFallback();
 
     let sandboxResult;
     try {
@@ -347,27 +347,68 @@ export class RecursiveMarketAnalyzer {
     return node;
   }
 
-  #makeClaudeFallback() {
+  // CLI specs: [command, ...args, null] where null is replaced with the prompt
+  static LLM_CLIS = {
+    claude:  { cmd: 'claude',   args: ['-p', null] },
+    codex:   { cmd: 'codex',    args: ['exec', null] },
+    gemini:  { cmd: 'gemini',   args: ['-p', null] },
+    copilot: { cmd: 'copilot',  args: ['-p', '-s', null] },
+  };
+
+  #makeLlmFallback() {
     if (!this.config.sandbox.enableLlmQuery) return null;
-    // Check if `claude` CLI is available
-    try {
-      execFileSync('claude', ['--version'], { stdio: 'ignore', timeout: 3000 });
-    } catch {
-      this.logger.debug('claude CLI not found, llm_query disabled');
-      return null;
+
+    const preferred = this.config.sandbox.llmCli; // e.g. 'claude', 'gemini', etc.
+    const exec = promisify(execFile);
+
+    // If user specified a CLI, try only that one
+    if (preferred && preferred !== 'auto') {
+      const spec = RecursiveMarketAnalyzer.LLM_CLIS[preferred];
+      if (!spec) {
+        this.logger.warn(`Unknown llm CLI "${preferred}". Available: ${Object.keys(RecursiveMarketAnalyzer.LLM_CLIS).join(', ')}`);
+        return null;
+      }
+      if (!this.#cliAvailable(spec.cmd)) {
+        this.logger.warn(`${preferred} CLI not found, llm_query disabled`);
+        return null;
+      }
+      this.logger.debug(`llm_query: using ${preferred} (on-device)`);
+      return this.#wrapCli(spec, exec);
     }
-    this.logger.debug('claude CLI available, llm_query enabled (on-device mode)');
+
+    // Auto-detect: try each CLI in order
+    for (const [name, spec] of Object.entries(RecursiveMarketAnalyzer.LLM_CLIS)) {
+      if (this.#cliAvailable(spec.cmd)) {
+        this.logger.debug(`llm_query: auto-detected ${name} (on-device)`);
+        return this.#wrapCli(spec, exec);
+      }
+    }
+
+    this.logger.debug('No LLM CLI found (tried claude, codex, gemini, copilot). llm_query disabled.');
+    return null;
+  }
+
+  #cliAvailable(cmd) {
+    try {
+      execFileSync(cmd, ['--version'], { stdio: 'ignore', timeout: 3000 });
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  #wrapCli(spec, exec) {
     return async (prompt) => {
       try {
-        const exec = promisify(execFile);
-        const { stdout } = await exec('claude', ['-p', prompt], {
-          timeout: 30_000,
-          maxBuffer: 1024 * 1024,
+        const args = spec.args.map((a) => a === null ? prompt : a);
+        const { stdout } = await exec(spec.cmd, args, {
+          timeout: 60_000,
+          maxBuffer: 2 * 1024 * 1024,
           env: { ...process.env, NO_COLOR: '1' },
         });
         return stdout.trim();
       } catch (err) {
-        return `[claude error: ${err.message}]`;
+        return `[${spec.cmd} error: ${err.message}]`;
       }
     };
   }
