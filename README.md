@@ -1,21 +1,18 @@
-```
-                    ╭─────────────────────────────────────────╮
-                    │                                         │
-  ╭──╮              │   Y A H O O                             │
-  │$$│  ┌──┐        │           h o o                         │
-  │$$│  │▓▓│ ┌──┐   │              o o o                      │
-  │$$│  │▓▓│ │░░│   │                 o o o ~                 │
-  │$$│  │▓▓│ │░░│   │   recursive market analysis             │
-  └──┘  └──┘ └──┘   │   mcp · yahoo finance · coingecko      │
-  ───────────────   │                                         │
-  SPY QQQ BTC       ╰─────────────────────────────────────────╯
-```
-
 # Yahoohoo
 
-MCP server for market-data analysis. Yahoo Finance for equities/ETFs/options, CoinGecko for crypto. Sandboxed Python for numerical computation. No API keys required.
+Yahoohoo is an MCP server for market-data analysis. It uses Yahoo Finance for equities, ETFs, and options, CoinGecko for crypto data, and sandboxed Python for numerical computation. No API keys are required for the default setup.
 
-Works with any MCP host — Claude, Codex, ChatGPT, Cursor, Windsurf. When the host supports MCP sampling, Yahoohoo uses it for recursive reasoning. When it doesn't, deterministic heuristics cover everything.
+It works with any MCP host, including Claude, Codex, ChatGPT, Cursor, and Windsurf. When the host supports MCP sampling, Yahoohoo can break larger requests into smaller analysis steps and synthesize the results. When it does not, Yahoohoo falls back to deterministic heuristics.
+
+That recursive analysis looks like this in practice:
+
+```text
+compare QQQ vs IWM vs TLT performance and risk
+├─ analyze QQQ
+├─ analyze IWM
+├─ analyze TLT
+└─ synthesize cross-symbol comparisons and conclusions
+```
 
 ## Install
 
@@ -26,19 +23,22 @@ yahoohoo --transport stdio
 
 Requires Node 22+ and Python 3.
 
-## Host Setup
+## Host setup
 
-**Claude Code:**
+**Claude Code**
+
 ```bash
 claude mcp add --transport stdio yahoohoo -- npx yahoohoo --transport stdio
 ```
 
-**Codex:**
+**Codex**
+
 ```bash
 codex mcp add yahoohoo -- npx yahoohoo --transport stdio
 ```
 
-**Claude Desktop** — add to `claude_desktop_config.json`:
+**Claude Desktop** — add this to `claude_desktop_config.json`:
+
 ```json
 {
   "mcpServers": {
@@ -50,11 +50,11 @@ codex mcp add yahoohoo -- npx yahoohoo --transport stdio
 }
 ```
 
-**ChatGPT / remote hosts** — run in HTTP mode behind HTTPS. See [docs/CHATGPT.md](docs/CHATGPT.md).
+**ChatGPT and other remote hosts** — run Yahoohoo in HTTP mode behind HTTPS. See [docs/CHATGPT.md](docs/CHATGPT.md).
 
-## Tools
+## Available tools
 
-### Market Data (Yahoo Finance)
+### Market data (Yahoo Finance)
 
 | Tool | What it does |
 |------|-------------|
@@ -63,36 +63,36 @@ codex mcp add yahoohoo -- npx yahoohoo --transport stdio
 | `yahoo_historical` | OHLCV bars, or `summary=true` for computed stats |
 | `yahoo_quote_summary` | Fundamentals and company profile |
 | `yahoo_options` | Option chains with multi-expiry sweep |
-| `yahoo_screener` | day_gainers, day_losers, most_actives, etc. |
+| `yahoo_screener` | day_gainers, day_losers, most_actives, and other predefined screens |
 | `yahoo_trending` | Trending symbols by region |
-| `yahoo_insights` | Technical levels, outlook, analyst recs |
+| `yahoo_insights` | Technical levels, outlook, and analyst recommendations |
 
 ### Crypto (CoinGecko)
 
 | Tool | What it does |
 |------|-------------|
 | `crypto_trending` | Trending coins and categories |
-| `crypto_global` | Total market cap, BTC/ETH dominance, volume |
+| `crypto_global` | Total market cap, BTC/ETH dominance, and volume |
 | `crypto_markets` | Top coins by market cap with price changes |
-| `crypto_coin` | Detailed coin info — supply, ATH/ATL, categories |
-| `crypto_search` | Search coins, get CoinGecko IDs |
+| `crypto_coin` | Detailed coin info, including supply, ATH/ATL, and categories |
+| `crypto_search` | Search coins and get CoinGecko IDs |
 
-Yahoo Finance also handles crypto symbols directly (`BTC-USD`, `ETH-USD`) for quotes and historical data. The crypto tools add what Yahoo doesn't: trending, global overview, market cap rankings, coin metadata.
+Yahoo Finance also supports crypto tickers like `BTC-USD` and `ETH-USD` for quotes and historical data. The CoinGecko tools fill in the gaps with trending data, market-cap rankings, market-wide metrics, and richer coin metadata.
 
-### Recursive Analysis
+### Analysis tools
 
 | Tool | What it does |
 |------|-------------|
-| `yahoohoo_analyze` | Sandboxed analysis — returns summary + runId |
-| `yahoohoo_peek` | Navigate stored results by dot-path |
-| `yahoohoo_drill` | Follow-up analysis inheriting previous params |
-| `yahoohoo_options_dashboard` | ASCII options dashboard — GEX, key levels, dealer positioning |
+| `yahoohoo_analyze` | Run a sandboxed analysis and return a summary with a `runId` |
+| `yahoohoo_peek` | Explore saved analysis results by dot-path |
+| `yahoohoo_drill` | Run follow-up analysis while inheriting the previous run's parameters |
+| `yahoohoo_options_dashboard` | Render an ASCII options dashboard with GEX, key levels, and dealer-positioning proxies |
 
-The analysis engine classifies intent (comparison, risk, options, fundamentals, macro), selects a specialized Python program, fetches data, runs computation in a sandboxed subprocess, and optionally decomposes into child analyses. Results stay server-side; the host gets a compact summary and navigates deeper with `yahoohoo_peek`.
+The analysis engine classifies intent (for example comparison, risk, options, fundamentals, or macro), selects the matching Python program, fetches the required data, and runs the computation in a sandboxed subprocess. For more involved questions it can split the work into child analyses and store the detailed output server-side, while the host receives a compact summary and a `runId` for deeper inspection.
 
-## `llm_query()` — LLM sub-calls from the sandbox
+## Optional: `llm_query()` inside the sandbox
 
-Sandbox Python code can call `llm_query("prompt")` to invoke an LLM mid-computation ([RLM pattern](https://arxiv.org/abs/2512.24601)). Yahoohoo auto-detects which CLI is installed and uses it:
+Sandbox Python code can call `llm_query("prompt")` to make a local LLM sub-call during computation ([RLM pattern](https://arxiv.org/abs/2512.24601)). Yahoohoo auto-detects which supported CLI is installed:
 
 | CLI | Command | Install |
 |-----|---------|---------|
@@ -101,7 +101,7 @@ Sandbox Python code can call `llm_query("prompt")` to invoke an LLM mid-computat
 | Gemini | `gemini -p "prompt"` | [github.com/google-gemini/gemini-cli](https://github.com/google-gemini/gemini-cli) |
 | Copilot | `copilot -p -s "prompt"` | [github.com/github/copilot-cli](https://github.com/github/copilot-cli) |
 
-Auto-detection order: claude → codex → gemini → copilot. Override with:
+Detection order is `claude`, then `codex`, then `gemini`, then `copilot`. Override it with:
 
 ```bash
 YAHOOHOO_LLM_CLI=gemini    # force a specific CLI
@@ -109,18 +109,18 @@ YAHOOHOO_LLM_CLI=auto      # auto-detect (default)
 YAHOOHOO_LLM_QUERY=false   # disable entirely
 ```
 
-This is on-device only — the CLI runs locally on your machine. It doesn't work from remote MCP hosts like Claude Desktop or ChatGPT.
+This only works when the CLI is available on the same machine as Yahoohoo. It does not apply when Yahoohoo is running remotely for a host like ChatGPT or Claude Desktop.
 
 ## Example
 
-```
+```json
 yahoohoo_analyze({
   "query": "compare QQQ vs IWM vs TLT performance and risk",
   "symbols": ["QQQ", "IWM", "TLT"]
 })
 ```
 
-```
+```text
 Analysis objective: compare QQQ vs IWM vs TLT performance and risk
 Scope: QQQ, IWM, TLT
 Window: 2025-09-08 → 2026-03-07 (1wk)
@@ -139,26 +139,27 @@ Pairwise:
 [run: abc123] [confidence: 0.85] [intent: comparison]
 ```
 
-## Docs
+## Documentation
 
-- [Architecture](docs/ARCHITECTURE.md) — three-layer design, data flow, transport strategy
-- [Configuration](docs/CONFIG.md) — all env vars, HTTP mode, deployment
-- [Security](docs/SECURITY.md) — sandbox threat model, what it does and doesn't protect against
-- [ChatGPT Setup](docs/CHATGPT.md) — HTTP mode with HTTPS for remote hosts
+- [Architecture](docs/ARCHITECTURE.md) — three-layer design, data flow, and transport strategy
+- [Configuration](docs/CONFIG.md) — environment variables, HTTP mode, and deployment
+- [Security](docs/SECURITY.md) — sandbox threat model and limitations
+- [ChatGPT setup](docs/CHATGPT.md) — running in HTTP mode for remote hosts
 
 ## Caveats
 
-- Yahoo Finance is unofficial. Data availability and response shapes can change.
-- Options dealer-position outputs (GEX, gamma flip) are **proxies** based on OI and Black-Scholes gamma, not exact dealer inventory.
-- CoinGecko free tier: ~10-30 calls/min without key, 30/min with demo key (`COINGECKO_API_KEY`).
-- The Python sandbox blocks dangerous imports and applies resource limits. It is not VM-level isolation. See [Security](docs/SECURITY.md).
+- Yahoo Finance is unofficial, so data availability and response shapes can change.
+- Options dealer-position outputs such as GEX and gamma flip are estimates derived from open interest and Black-Scholes gamma, not direct dealer inventory.
+- CoinGecko's free tier is limited to roughly 10-30 calls per minute without a key and 30 calls per minute with a demo key (`COINGECKO_API_KEY`).
+- The Python sandbox blocks dangerous imports and applies resource limits, but it is not VM-level isolation. See [Security](docs/SECURITY.md) for details.
 
 ## Development
 
 ```bash
-npm test               # 213 deterministic tests, no network
-npm run test:live      # includes live Yahoo Finance integration
-npm run smoke:sandbox  # smoke test the Python sandbox
+npm run check         # syntax-check source files
+npm test              # 213 deterministic tests, no network
+npm run test:live     # includes live Yahoo Finance integration
+npm run smoke:sandbox # smoke test the Python sandbox
 ```
 
 ## License
