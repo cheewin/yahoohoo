@@ -1,7 +1,7 @@
 {
   "name": "yahoohoo",
-  "version": "0.1.0",
-  "description": "Yahoo Finance MCP server with sandboxed recursive market analysis using host-provided MCP sampling.",
+  "version": "0.2.0",
+  "description": "Yahoo Finance + CoinGecko MCP server with sandboxed recursive market analysis. Stocks, ETFs, options, and crypto — zero API keys required.",
   "type": "module",
   "main": "src/index.js",
   "bin": {
@@ -29,7 +29,12 @@
     "stocks",
     "market-data",
     "sandbox",
-    "agentic"
+    "agentic",
+    "crypto",
+    "cryptocurrency",
+    "coingecko",
+    "bitcoin",
+    "options"
   ],
   "author": "Hunter Bown",
   "repository": {
