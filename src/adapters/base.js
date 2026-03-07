@@ -48,4 +48,16 @@ export class MarketDataProvider {
   async options(_symbol, _date) {
     throw new Error('options() not implemented');
   }
+
+  async screener(_screenId, _count = 10) {
+    throw new Error('screener() not implemented');
+  }
+
+  async trending(_region, _count = 10) {
+    throw new Error('trending() not implemented');
+  }
+
+  async insights(_symbol) {
+    throw new Error('insights() not implemented');
+  }
 }

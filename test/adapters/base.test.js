@@ -12,6 +12,9 @@ describe('MarketDataProvider', () => {
     await assert.rejects(() => provider.historical('AAPL', {}), /not implemented/);
     await assert.rejects(() => provider.quoteSummary('AAPL', []), /not implemented/);
     await assert.rejects(() => provider.options('AAPL'), /not implemented/);
+    await assert.rejects(() => provider.screener('day_gainers'), /not implemented/);
+    await assert.rejects(() => provider.trending('US'), /not implemented/);
+    await assert.rejects(() => provider.insights('AAPL'), /not implemented/);
   });
 });
 

@@ -63,6 +63,41 @@ function compactSearch(result, limit = 10) {
   }));
 }
 
+function compactScreenerQuote(q) {
+  return {
+    symbol: q.symbol,
+    shortName: q.shortName || q.longName || null,
+    regularMarketPrice: q.regularMarketPrice ?? null,
+    regularMarketChangePercent: q.regularMarketChangePercent ?? null,
+    marketCap: q.marketCap ?? null,
+    regularMarketVolume: q.regularMarketVolume ?? null,
+    trailingPE: q.trailingPE ?? null,
+  };
+}
+
+function compactInsights(result) {
+  const kt = result?.instrumentInfo?.keyTechnicals;
+  const te = result?.instrumentInfo?.technicalEvents;
+  const v = result?.instrumentInfo?.valuation;
+  const formatOutlook = (o) =>
+    o ? { direction: o.direction ?? null, score: o.score ?? null, description: o.stateDescription ?? null } : null;
+  return {
+    symbol: result?.symbol || null,
+    technicals: kt ? { support: kt.support ?? null, resistance: kt.resistance ?? null, stopLoss: kt.stopLoss ?? null } : null,
+    outlook: te
+      ? { shortTerm: formatOutlook(te.shortTermOutlook), midTerm: formatOutlook(te.intermediateTermOutlook), longTerm: formatOutlook(te.longTermOutlook) }
+      : null,
+    valuation: v ? { description: v.description ?? null, discount: v.discount ?? null, relativeValue: v.relativeValue ?? null } : null,
+    recommendation: result?.recommendation
+      ? { rating: result.recommendation.rating ?? null, targetPrice: result.recommendation.targetPrice ?? null, provider: result.recommendation.provider ?? null }
+      : null,
+    sigDevs: Array.isArray(result?.sigDevs)
+      ? result.sigDevs.slice(0, 5).map((d) => ({ headline: d.headline, date: d.date instanceof Date ? d.date.toISOString().slice(0, 10) : d.date }))
+      : [],
+    companySnapshot: result?.companySnapshot ? { sectorInfo: result.companySnapshot.sectorInfo ?? null, company: result.companySnapshot.company ?? null } : null,
+  };
+}
+
 function compactOptions(result) {
   const calls = Array.isArray(result?.calls) ? result.calls : [];
   const puts = Array.isArray(result?.puts) ? result.puts : [];
@@ -165,6 +200,43 @@ export class YahooMarketData extends MarketDataProvider {
       } catch (error) {
         this.logger.warn(`Yahoo options failed for ${symbol}:`, error.message);
         return { underlyingSymbol: symbol, expirationDates: [], strikes: [], calls: [], puts: [], quote: null };
+      }
+    });
+  }
+
+  async screener(screenId, count = 10) {
+    return this.cache.memo(key(['screener', screenId, count]), async () => {
+      try {
+        const result = await this.yf.screener(screenId, { count });
+        const quotes = Array.isArray(result?.quotes) ? result.quotes : [];
+        return { total: result?.total ?? quotes.length, quotes: quotes.map(compactScreenerQuote) };
+      } catch (error) {
+        this.logger.warn(`Yahoo screener failed for "${screenId}":`, error.message);
+        return { total: 0, quotes: [] };
+      }
+    });
+  }
+
+  async trending(region = 'US', count = 10) {
+    return this.cache.memo(key(['trending', region, count]), async () => {
+      try {
+        const result = await this.yf.trendingSymbols(region, { count });
+        return Array.isArray(result?.quotes) ? result.quotes.map((q) => q.symbol) : [];
+      } catch (error) {
+        this.logger.warn(`Yahoo trending failed for "${region}":`, error.message);
+        return [];
+      }
+    });
+  }
+
+  async insights(symbol) {
+    return this.cache.memo(key(['insights', symbol]), async () => {
+      try {
+        const result = await this.yf.insights(symbol);
+        return compactInsights(result);
+      } catch (error) {
+        this.logger.warn(`Yahoo insights failed for ${symbol}:`, error.message);
+        return { symbol, error: error.message };
       }
     });
   }

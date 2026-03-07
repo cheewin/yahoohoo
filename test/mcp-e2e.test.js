@@ -179,7 +179,12 @@ describe('MCP end-to-end', () => {
       assert.ok(toolNames.includes('yahoo_quote_summary'));
       assert.ok(toolNames.includes('yahoo_options'));
       assert.ok(toolNames.includes('yahoohoo_analyze'));
-      assert.equal(toolNames.length, 6);
+      assert.ok(toolNames.includes('yahoo_screener'));
+      assert.ok(toolNames.includes('yahoo_trending'));
+      assert.ok(toolNames.includes('yahoo_insights'));
+      assert.ok(toolNames.includes('yahoohoo_peek'));
+      assert.ok(toolNames.includes('yahoohoo_drill'));
+      assert.equal(toolNames.length, 11);
     });
 
     it('tools have valid input schemas', async () => {
