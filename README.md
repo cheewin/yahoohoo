@@ -10,12 +10,12 @@
   ───────────────   │                                         │
   SPY QQQ IWM       ╰─────────────────────────────────────────╯
 
-  MCP server · Yahoo Finance · sandboxed Python · zero API keys
+  MCP server · Yahoo Finance · CoinGecko · sandboxed Python · zero API keys
 ```
 
 # Yahoohoo
 
-An MCP server that gives AI assistants real market-data analysis capabilities. It connects to Yahoo Finance, runs numerical computations in a sandboxed Python subprocess, and optionally uses the host LLM for recursive reasoning — all without needing its own API key.
+An MCP server that gives AI assistants real market-data analysis capabilities. It connects to Yahoo Finance for equities/ETFs/indices and CoinGecko for crypto, runs numerical computations in a sandboxed Python subprocess, and optionally uses the host LLM for recursive reasoning — all without needing an API key.
 
 ```text
 MCP Host (Claude, Codex, ChatGPT, etc.)
@@ -24,6 +24,7 @@ MCP Host (Claude, Codex, ChatGPT, etc.)
   ▼
 Yahoohoo MCP Server (Node.js)
   ├─ Yahoo Finance adapter (search, quotes, OHLCV, options, fundamentals)
+  ├─ CoinGecko adapter (crypto prices, trending, market cap rankings, coin details)
   ├─ intent classifier → program selector
   ├─ recursive analysis engine (comparison, risk, options, fundamentals)
   └─ Python sandbox (numpy/pandas, resource limits, JSON-only output)
@@ -83,9 +84,9 @@ codex mcp add yahoohoo -- npx yahoohoo --transport stdio
 
 ---
 
-## Tools (12)
+## Tools (17)
 
-### Data Tools
+### Data Tools (Yahoo Finance)
 
 | Tool | Description |
 |------|-------------|
@@ -97,6 +98,18 @@ codex mcp add yahoohoo -- npx yahoohoo --transport stdio
 | `yahoo_screener` | Predefined screens: day_gainers, day_losers, most_actives, etc. |
 | `yahoo_trending` | Currently trending symbols by region |
 | `yahoo_insights` | Technical levels, outlook, analyst recs, significant developments |
+
+### Crypto Tools (CoinGecko)
+
+| Tool | Description |
+|------|-------------|
+| `crypto_trending` | Currently trending coins and categories |
+| `crypto_global` | Global market overview: total cap, BTC/ETH dominance, volume |
+| `crypto_markets` | Top coins by market cap with price changes (1h/24h/7d/30d) |
+| `crypto_coin` | Detailed coin info: supply, ATH/ATL, description, categories |
+| `crypto_search` | Search coins by name/symbol, returns CoinGecko IDs |
+
+> **Note:** Yahoo Finance also handles crypto symbols directly (e.g., `BTC-USD`, `ETH-USD`) for quotes and historical data via `yahoo_quote` and `yahoo_historical`. The crypto tools add CoinGecko-specific data that Yahoo doesn't provide: trending coins, global market overview, market cap rankings, and detailed coin metadata.
 
 ### Analysis Tools (RLM pattern)
 
@@ -316,6 +329,7 @@ All configuration is via environment variables. No config files.
 | `YAHOOHOO_RATE_LIMIT` | `60` | Max requests per minute per IP |
 | `YAHOOHOO_MAX_SESSIONS` | `50` | Max concurrent MCP sessions |
 | `YAHOOHOO_DATA_PROVIDER` | `yahoo` | Market data provider |
+| `COINGECKO_API_KEY` | *(none)* | CoinGecko demo API key (optional, increases rate limit) |
 | `YAHOOHOO_CACHE_TTL_MS` | `30000` | Market data cache TTL |
 | `YAHOOHOO_DEFAULT_LOOKBACK_DAYS` | `180` | Default historical window |
 | `YAHOOHOO_DEFAULT_BENCHMARK` | `SPY` | Default benchmark symbol |
@@ -357,7 +371,7 @@ fly launch --config deploy/fly.toml && fly deploy
 # Railway — import repo, point at deploy/railway.toml
 ```
 
-CI runs `npm run check`, `npm test` (205 tests), and `npm run smoke:sandbox`.
+CI runs `npm run check`, `npm test` (209 tests), and `npm run smoke:sandbox`.
 
 ---
 
@@ -381,6 +395,8 @@ Things we're thinking about building. PRs welcome.
 - **Real-time streaming** — WebSocket feed for live quotes and options flow
 - **FRED / macro data** — Federal Reserve economic data (rates, CPI, employment) via FRED API
 - **Earnings calendar integration** — Pre/post earnings analysis with expected move calculations
+- **Binance deep OHLCV** — High-resolution crypto candles (1s to 1M intervals) via Binance public API
+- **On-chain data** — DeFi TVL, whale movements, exchange flows via free APIs (DefiLlama, etc.)
 - **Alternative data adapters** — Polygon.io, Alpha Vantage, IEX Cloud as drop-in replacements via `YAHOOHOO_DATA_PROVIDER`
 
 ### Analysis

@@ -11,7 +11,7 @@ Yahoohoo is an MCP server for market-data analysis. It combines Yahoo Finance da
 ```bash
 npm install                # install dependencies (Node 22+)
 npm run check              # syntax-check all source files
-npm test                   # run full test suite (205 deterministic tests, no network)
+npm test                   # run full test suite (209 deterministic tests, no network)
 npm run test:live          # run tests including live Yahoo Finance integration (184 total)
 npm run smoke:sandbox      # run sandbox smoke test via Python
 node src/index.js --transport stdio   # start in stdio mode
@@ -26,6 +26,8 @@ Three-layer design, all plain ESM JavaScript (no TypeScript, no bundler):
 `src/adapters/base.js` — `MarketDataProvider` abstract base class defining the interface for all market data sources (search, quote, historical, quoteSummary, options).
 
 `src/adapters/yahoo.js` — `YahooMarketData extends MarketDataProvider`. Wraps `yahoo-finance2`. Uses `chart()` API (not deprecated `historical()`). Normalizes search, quotes, historical bars, quote summaries, and option chains. Has a short TTL cache to avoid repeated calls during recursive analysis.
+
+`src/adapters/coingecko.js` — `CoinGeckoData` supplementary crypto provider. Wraps CoinGecko's free public API for trending coins, global market stats, top coins by market cap, coin details, and search. No API key required (optional demo key via `COINGECKO_API_KEY` for higher rate limits). TTL-cached.
 
 `src/adapters/index.js` — Provider registry. `createMarketDataProvider()` selects the provider via `YAHOOHOO_DATA_PROVIDER` env var (default: `yahoo`). Future providers plug in here.
 
@@ -58,7 +60,7 @@ Three-layer design, all plain ESM JavaScript (no TypeScript, no bundler):
 - `src/index.js` — Entry point. Parses `--transport` arg, sets up stdio or Express HTTP server with Streamable HTTP MCP transport. Installs SIGTERM/SIGINT graceful shutdown handler with configurable drain timeout.
 - `src/http.js` — HTTP transport wiring with host-header guard, API key auth, rate limiting, session limits (`YAHOOHOO_MAX_SESSIONS`), request logging with IDs and timing, `/mcp` routing, and `/health` readiness endpoint.
 - `src/server.js` — `createYahoohooServer()` wires together marketData (via provider registry), sandbox, analyzer, runStore, and registers tools + resources.
-- `src/tools.js` — `registerTools()` defines all MCP tools (`yahoo_search`, `yahoo_quote`, `yahoo_historical`, `yahoo_quote_summary`, `yahoo_options`, `yahoohoo_analyze`), one prompt (`market_study_prompt`), and an MCP resource template (`yahoohoo://analysis/{id}`) for saved analysis runs.
+- `src/tools.js` — `registerTools()` defines all 17 MCP tools: Yahoo data tools (`yahoo_search`, `yahoo_quote`, `yahoo_historical`, `yahoo_quote_summary`, `yahoo_options`, `yahoo_screener`, `yahoo_trending`, `yahoo_insights`), crypto tools (`crypto_trending`, `crypto_global`, `crypto_markets`, `crypto_coin`, `crypto_search`), and analysis tools (`yahoohoo_analyze`, `yahoohoo_peek`, `yahoohoo_drill`, `yahoohoo_options_dashboard`). Also one prompt (`market_study_prompt`) and an MCP resource template (`yahoohoo://analysis/{id}`) for saved analysis runs.
 
 ### Utilities (`src/lib/`)
 - `config.js` — All configuration from env vars with defaults (see `loadConfig()`)
@@ -75,7 +77,7 @@ Three-layer design, all plain ESM JavaScript (no TypeScript, no bundler):
 
 ## Key design decisions
 
-- Test suite uses `node:test` (built-in, no deps) — `npm test` runs 205 deterministic tests covering lib (cache, dates, json, config, errors, runStore), heuristics (confidence), intents, programs, sandbox (all programs), sampling, analyzer (confidence, intent-aware children), adapters (provider abstraction), HTTP transport (auth/rate-limit/session-limits), and MCP E2E (session lifecycle, tool calls, prompts, resources, errors); `npm run test:live` adds live Yahoo Finance integration coverage
+- Test suite uses `node:test` (built-in, no deps) — `npm test` runs 209 deterministic tests covering lib (cache, dates, json, config, errors, runStore), heuristics (confidence), intents, programs, sandbox (all programs), sampling, analyzer (confidence, intent-aware children), adapters (provider abstraction, CoinGecko), HTTP transport (auth/rate-limit/session-limits), and MCP E2E (session lifecycle, tool calls, prompts, resources, errors); `npm run test:live` adds live Yahoo Finance integration coverage
 - The sandbox blocks dangerous imports, `eval`/`exec`/`open`, and applies resource limits where Python's `resource` module is available. It is **not** VM-level isolation.
 - Tool input schemas use Zod 4 (`z.object(...)`) registered via `server.registerTool()`
 - Config is purely env-var driven — no config files. See `src/lib/config.js` for all `YAHOOHOO_*` variables.

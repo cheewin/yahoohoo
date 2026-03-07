@@ -22,6 +22,7 @@ describe('yahoohoo_peek compatibility', () => {
     registerTools({
       server,
       marketData: {},
+      cryptoData: {},
       analyzer: {},
       runStore: {
         get: () => ({
@@ -56,6 +57,7 @@ describe('yahoohoo_peek compatibility', () => {
     registerTools({
       server,
       marketData: {},
+      cryptoData: {},
       analyzer: {},
       runStore: {
         get: () => ({
@@ -92,6 +94,7 @@ describe('yahoohoo_peek compatibility', () => {
     registerTools({
       server,
       marketData: {},
+      cryptoData: {},
       analyzer: {},
       runStore: {
         get: () => ({
@@ -120,6 +123,7 @@ describe('yahoohoo_peek compatibility', () => {
     registerTools({
       server,
       marketData: {},
+      cryptoData: {},
       analyzer: {},
       runStore: {
         get: () => ({

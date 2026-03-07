@@ -104,7 +104,7 @@ const SCREENER_IDS = [
   'most_shorted_stocks', 'small_cap_gainers', 'aggressive_small_caps',
 ];
 
-export function registerTools({ server, marketData, analyzer, runStore, config }) {
+export function registerTools({ server, marketData, cryptoData, analyzer, runStore, config }) {
   // ── Data Tools ──────────────────────────────────────────────────────
 
   server.registerTool(
@@ -299,6 +299,129 @@ export function registerTools({ server, marketData, analyzer, runStore, config }
         for (const d of ins.sigDevs) parts.push(`  ${d.date}: ${d.headline}`);
       }
       return textResult(parts.join('\n'));
+    },
+  );
+
+  // ── Crypto Tools (CoinGecko) ──────────────────────────────────────
+
+  server.registerTool(
+    'crypto_trending',
+    {
+      title: 'Crypto Trending',
+      description: 'Get currently trending cryptocurrencies (what people are searching for). Powered by CoinGecko.',
+      inputSchema: z.object({}),
+    },
+    async () => {
+      const data = await cryptoData.trending();
+      const lines = data.coins.map((c) => {
+        const price = c.data?.price != null ? `$${typeof c.data.price === 'number' ? c.data.price.toLocaleString() : c.data.price}` : '';
+        const change = c.data?.price_change_24h != null ? ` ${c.data.price_change_24h >= 0 ? '+' : ''}${(+c.data.price_change_24h).toFixed(1)}%` : '';
+        return `#${c.rank ?? '?'} ${c.symbol} (${c.name}) ${price}${change}`;
+      });
+      const catLines = data.categories.map(
+        (cat) => `  ${cat.name}: ${cat.market_cap_change_24h != null ? (cat.market_cap_change_24h >= 0 ? '+' : '') + cat.market_cap_change_24h.toFixed(1) + '%' : '?'}`,
+      );
+      const text = `Trending Coins:\n${lines.join('\n')}${catLines.length ? '\n\nTrending Categories:\n' + catLines.join('\n') : ''}`;
+      return textResult(text);
+    },
+  );
+
+  server.registerTool(
+    'crypto_global',
+    {
+      title: 'Crypto Global Market',
+      description: 'Get global cryptocurrency market overview: total market cap, BTC/ETH dominance, 24h volume, active coins. Powered by CoinGecko.',
+      inputSchema: z.object({}),
+    },
+    async () => {
+      const data = await cryptoData.global();
+      if (!data) return textResult('Global crypto data unavailable (rate limited or error).');
+      const fmt = (n) => n != null ? '$' + (n >= 1e12 ? (n / 1e12).toFixed(2) + 'T' : n >= 1e9 ? (n / 1e9).toFixed(1) + 'B' : n.toLocaleString()) : '?';
+      const lines = [
+        `Total Market Cap: ${fmt(data.total_market_cap_usd)} (${data.market_cap_change_24h_pct != null ? (data.market_cap_change_24h_pct >= 0 ? '+' : '') + data.market_cap_change_24h_pct.toFixed(2) + '% 24h' : '?'})`,
+        `24h Volume: ${fmt(data.total_volume_24h_usd)}`,
+        `Active Coins: ${data.active_cryptocurrencies?.toLocaleString() ?? '?'} across ${data.markets ?? '?'} markets`,
+        `BTC Dominance: ${data.btc_dominance?.toFixed(1) ?? '?'}%`,
+        `ETH Dominance: ${data.eth_dominance?.toFixed(1) ?? '?'}%`,
+        '',
+        'Top 10 Dominance:',
+        ...data.top_dominance.map((d) => `  ${d.symbol}: ${d.dominance_pct}%`),
+      ];
+      return textResult(lines.join('\n'));
+    },
+  );
+
+  server.registerTool(
+    'crypto_markets',
+    {
+      title: 'Crypto Top Coins',
+      description: 'Get top cryptocurrencies by market cap with price, volume, and change data. Powered by CoinGecko.',
+      inputSchema: z.object({
+        count: z.number().int().min(1).max(100).default(20).describe('Number of coins to return (default: 20, max: 100)'),
+      }),
+    },
+    async ({ count }) => {
+      const coins = await cryptoData.markets(count);
+      if (!coins.length) return textResult('Crypto market data unavailable.');
+      const lines = coins.map((c) => {
+        const cap = c.market_cap ? (c.market_cap >= 1e12 ? (c.market_cap / 1e12).toFixed(2) + 'T' : (c.market_cap / 1e9).toFixed(1) + 'B') : '?';
+        const ch24 = c.change_24h_pct != null ? (c.change_24h_pct >= 0 ? '+' : '') + c.change_24h_pct.toFixed(1) + '%' : '';
+        const ch7d = c.change_7d_pct != null ? (c.change_7d_pct >= 0 ? '+' : '') + c.change_7d_pct.toFixed(1) + '%' : '';
+        return `#${c.rank ?? '?'} ${c.symbol} $${c.price?.toLocaleString() ?? '?'} 24h:${ch24} 7d:${ch7d} cap:$${cap}`;
+      });
+      return textResult(`Top ${coins.length} Cryptocurrencies:\n${lines.join('\n')}`);
+    },
+  );
+
+  server.registerTool(
+    'crypto_coin',
+    {
+      title: 'Crypto Coin Detail',
+      description: 'Get detailed info for a cryptocurrency: price, market cap, supply, ATH/ATL, price changes, description. Use CoinGecko ID (e.g. "bitcoin", "ethereum", "solana") or search first with crypto_search.',
+      inputSchema: z.object({
+        id: z.string().min(1).describe('CoinGecko coin ID (e.g. "bitcoin", "ethereum", "solana", "dogecoin")'),
+      }),
+    },
+    async ({ id }) => {
+      const coin = await cryptoData.coinInfo(id.toLowerCase());
+      if (!coin) return textResult(`Coin "${id}" not found or rate limited. Try crypto_search to find the correct ID.`);
+      const md = coin.market_data;
+      const fmt = (n) => n != null ? '$' + (n >= 1e12 ? (n / 1e12).toFixed(2) + 'T' : n >= 1e9 ? (n / 1e9).toFixed(1) + 'B' : n >= 1e6 ? (n / 1e6).toFixed(1) + 'M' : n.toLocaleString()) : '?';
+      const pct = (n) => n != null ? (n >= 0 ? '+' : '') + n.toFixed(1) + '%' : '?';
+      const lines = [
+        `${coin.name} (${coin.symbol}) — Rank #${md.market_cap_rank ?? '?'}`,
+        coin.description ? `\n${coin.description}\n` : '',
+        `Price: ${fmt(md.price_usd)}`,
+        `Market Cap: ${fmt(md.market_cap_usd)}`,
+        `24h Volume: ${fmt(md.volume_24h_usd)}`,
+        `24h Range: ${fmt(md.low_24h)} — ${fmt(md.high_24h)}`,
+        `ATH: ${fmt(md.ath)} (${pct(md.ath_change_pct)} from ATH)`,
+        `ATL: ${fmt(md.atl)}`,
+        '',
+        `Changes: 24h ${pct(md.price_change_24h_pct)} | 7d ${pct(md.price_change_7d_pct)} | 30d ${pct(md.price_change_30d_pct)} | 1y ${pct(md.price_change_1y_pct)}`,
+        '',
+        `Supply: ${md.circulating_supply?.toLocaleString() ?? '?'} circulating / ${md.total_supply?.toLocaleString() ?? '?'} total / ${md.max_supply?.toLocaleString() ?? 'unlimited'} max`,
+        coin.genesis_date ? `Genesis: ${coin.genesis_date}` : null,
+        coin.categories?.length ? `Categories: ${coin.categories.join(', ')}` : null,
+      ].filter(Boolean);
+      return textResult(lines.join('\n'));
+    },
+  );
+
+  server.registerTool(
+    'crypto_search',
+    {
+      title: 'Crypto Search',
+      description: 'Search cryptocurrencies by name or symbol. Returns CoinGecko IDs for use with crypto_coin.',
+      inputSchema: z.object({
+        query: z.string().min(1),
+      }),
+    },
+    async ({ query }) => {
+      const results = await cryptoData.search(query);
+      if (!results.length) return textResult(`No crypto results for "${query}".`);
+      const lines = results.map((c) => `${c.symbol} (${c.name}) — id: ${c.id}${c.rank ? ` rank:#${c.rank}` : ''}`);
+      return textResult(`Crypto search "${query}":\n${lines.join('\n')}`);
     },
   );
 

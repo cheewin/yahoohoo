@@ -79,6 +79,9 @@ export function loadConfig(overrides = {}) {
     sessions: {
       maxSessions: envInt('YAHOOHOO_MAX_SESSIONS', 50),
     },
+    crypto: {
+      apiKey: process.env.COINGECKO_API_KEY || null,
+    },
     storage: {
       maxSavedRuns: envInt('YAHOOHOO_MAX_SAVED_RUNS', 100),
     },

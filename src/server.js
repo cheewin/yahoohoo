@@ -1,6 +1,7 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { registerTools } from './tools.js';
 import { createMarketDataProvider } from './adapters/index.js';
+import { CoinGeckoData } from './adapters/coingecko.js';
 import { PythonSandbox } from './sandbox/index.js';
 import { RecursiveMarketAnalyzer } from './core/analyzer.js';
 import { RunStore } from './lib/runStore.js';
@@ -10,6 +11,12 @@ export function createYahoohooServer({ config, logger }) {
     provider: config.market.dataProvider,
     cacheTtlMs: config.market.cacheTtlMs,
     logger,
+  });
+
+  const cryptoData = new CoinGeckoData({
+    cacheTtlMs: config.market.cacheTtlMs,
+    logger,
+    apiKey: config.crypto?.apiKey,
   });
 
   const sandbox = new PythonSandbox({ config, logger });
@@ -30,6 +37,7 @@ export function createYahoohooServer({ config, logger }) {
   registerTools({
     server,
     marketData,
+    cryptoData,
     analyzer,
     runStore,
     config,
@@ -38,6 +46,7 @@ export function createYahoohooServer({ config, logger }) {
   return {
     server,
     marketData,
+    cryptoData,
     sandbox,
     analyzer,
     runStore,

@@ -185,7 +185,12 @@ describe('MCP end-to-end', () => {
       assert.ok(toolNames.includes('yahoohoo_peek'));
       assert.ok(toolNames.includes('yahoohoo_drill'));
       assert.ok(toolNames.includes('yahoohoo_options_dashboard'));
-      assert.equal(toolNames.length, 12);
+      assert.ok(toolNames.includes('crypto_trending'));
+      assert.ok(toolNames.includes('crypto_global'));
+      assert.ok(toolNames.includes('crypto_markets'));
+      assert.ok(toolNames.includes('crypto_coin'));
+      assert.ok(toolNames.includes('crypto_search'));
+      assert.equal(toolNames.length, 17);
     });
 
     it('tools have valid input schemas', async () => {
