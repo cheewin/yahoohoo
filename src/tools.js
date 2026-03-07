@@ -24,6 +24,43 @@ function getByPath(obj, path) {
   return current;
 }
 
+function toPairwiseMap(matrix) {
+  if (!matrix || typeof matrix !== 'object') return undefined;
+  return Object.fromEntries(
+    Object.entries(matrix).map(([name, correlation]) => [name, { correlation }]),
+  );
+}
+
+function toCorrelationMatrix(pairwise) {
+  if (!pairwise || typeof pairwise !== 'object') return undefined;
+  return Object.fromEntries(
+    Object.entries(pairwise).map(([name, value]) => [name, value?.correlation ?? null]),
+  );
+}
+
+function getCompatPath(obj, path) {
+  const metrics = obj?.metrics;
+  if (!metrics) return undefined;
+
+  if (path === 'metrics.pairwise' || path.startsWith('metrics.pairwise.')) {
+    const pairwise = metrics.pairwise && Object.keys(metrics.pairwise).length
+      ? metrics.pairwise
+      : toPairwiseMap(metrics.correlation_matrix);
+    if (path === 'metrics.pairwise') return pairwise;
+    return getByPath(pairwise, path.slice('metrics.pairwise.'.length));
+  }
+
+  if (path === 'metrics.correlation_matrix' || path.startsWith('metrics.correlation_matrix.')) {
+    const matrix = metrics.correlation_matrix && Object.keys(metrics.correlation_matrix).length
+      ? metrics.correlation_matrix
+      : toCorrelationMatrix(metrics.pairwise);
+    if (path === 'metrics.correlation_matrix') return matrix;
+    return getByPath(matrix, path.slice('metrics.correlation_matrix.'.length));
+  }
+
+  return undefined;
+}
+
 function computeBarStats(bars) {
   if (!bars.length) return { bars: 0 };
   const closes = bars.map((b) => b.close).filter((c) => c != null);
@@ -153,15 +190,39 @@ export function registerTools({ server, marketData, analyzer, runStore, config }
     'yahoo_options',
     {
       title: 'Yahoo Options',
-      description: 'Fetch an option chain snapshot from Yahoo Finance.',
+      description: 'Fetch option chain snapshots from Yahoo Finance. Use expiries > 1 to sweep multiple expiry dates and get per-expiry chains.',
       inputSchema: z.object({
         symbol: z.string().min(1),
         date: z.string().optional(),
+        expiries: z.number().int().min(1).max(12).default(1).describe('Number of expiry dates to fetch (default: 1, max: 12)'),
       }),
     },
-    async ({ symbol, date }) => {
-      const chain = await marketData.options(symbol.toUpperCase(), date);
-      return textResult(pretty(chain), chain);
+    async ({ symbol, date, expiries }) => {
+      const sym = symbol.toUpperCase();
+      const primary = await marketData.options(sym, date);
+      if (expiries <= 1) {
+        return textResult(pretty(primary), primary);
+      }
+      // Sweep mode: fetch additional expiry chains
+      const allDates = primary.expirationDates || [];
+      const primaryDateStr = primary.activeExpirationDate ? String(primary.activeExpirationDate).slice(0, 10) : null;
+      const startIdx = primaryDateStr ? allDates.indexOf(primaryDateStr) + 1 : 1;
+      const additionalDates = allDates.slice(startIdx > 0 ? startIdx : 1, (startIdx > 0 ? startIdx : 1) + expiries - 1);
+      const chains = [{
+        expirationDate: primaryDateStr || allDates[0] || null,
+        calls: primary.calls,
+        puts: primary.puts,
+      }];
+      for (const exDate of additionalDates) {
+        try {
+          const chain = await marketData.options(sym, exDate);
+          chains.push({ expirationDate: exDate, calls: chain.calls, puts: chain.puts });
+        } catch {
+          // Skip failed expiry fetches
+        }
+      }
+      const result = { ...primary, chains };
+      return textResult(pretty(result), result);
     },
   );
 
@@ -328,10 +389,10 @@ export function registerTools({ server, marketData, analyzer, runStore, config }
         const keys = Object.keys(analysis);
         const symbolList = analysis.symbols?.join(', ') || '?';
         return textResult(
-          `Run ${runId} — ${analysis.question}\nSymbols: ${symbolList}\nAvailable keys: ${keys.join(', ')}\n\nTip: peek into "metrics.symbols.<SYM>" for per-symbol data, "metrics.cross_section" for rankings, "metrics.comparisons" for benchmark stats, "children" for child analyses.`,
+          `Run ${runId} — ${analysis.question}\nSymbols: ${symbolList}\nAvailable keys: ${keys.join(', ')}\n\nTip: peek into "metrics.symbols.<SYM>" for per-symbol data, "metrics.cross_section" for rankings/leaders, "metrics.comparisons" for benchmark stats, "metrics.pairwise" for cross-asset correlations, "children" for child analyses.`,
         );
       }
-      const value = getByPath(analysis, path);
+      const value = getByPath(analysis, path) ?? getCompatPath(analysis, path);
       if (value === undefined) return textResult(`Path "${path}" not found in run ${runId}.`);
       const text = typeof value === 'object' ? JSON.stringify(value, null, 2) : String(value);
       // Truncate if too large to keep context clean
@@ -388,6 +449,48 @@ export function registerTools({ server, marketData, analyzer, runStore, config }
         `[intent: ${analysis.intent?.primary ?? 'general'}]`,
       ];
       return textResult(`${analysis.summary}\n\n${meta.join(' ')}`);
+    },
+  );
+
+  server.registerTool(
+    'yahoohoo_options_dashboard',
+    {
+      title: 'Options Dashboard',
+      description:
+        'Visual ASCII options dashboard: GEX profile chart, key levels, expiry sweep, IV term structure, dealer positioning. Like thinkorswim options analysis. Provide a symbol for fresh analysis or a runId to extract from a stored run.',
+      inputSchema: z.object({
+        symbol: z.string().min(1).optional().describe('Symbol to analyze (required if no runId)'),
+        expiries: z.number().int().min(1).max(12).default(5).describe('Number of expiry dates to sweep'),
+        runId: z.string().optional().describe('Extract dashboard from a previous analysis run'),
+      }),
+    },
+    async ({ symbol, expiries, runId }, ctx) => {
+      if (runId) {
+        const run = runStore.get(runId);
+        if (!run) return textResult(`Run ${runId} not found.`);
+        const syms = run.analysis.symbols || [];
+        const targetSym = symbol?.toUpperCase() || syms[0];
+        const dashboard = run.analysis.metrics?.symbols?.[targetSym]?.options?._dashboard;
+        if (!dashboard) return textResult(`No dashboard for ${targetSym} in run ${runId}. Run with includeOptions=true.`);
+        return textResult(dashboard);
+      }
+
+      if (!symbol) return textResult('Provide a symbol or runId.');
+      const sym = symbol.toUpperCase();
+
+      const analysis = await analyzer.analyze({
+        query: `options positioning for ${sym}`,
+        symbols: [sym],
+        reasoningMode: 'heuristic',
+        includeOptions: true,
+        maxDepth: 0,
+        ctx,
+      });
+
+      const rid = runStore.save(analysis);
+      const dashboard = analysis.metrics?.symbols?.[sym]?.options?._dashboard;
+      if (!dashboard) return textResult(`No options data available for ${sym}.`);
+      return textResult(`${dashboard}\n\n[run: ${rid}] [confidence: ${analysis.confidence}]`);
     },
   );
 

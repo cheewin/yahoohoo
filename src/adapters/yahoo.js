@@ -7,7 +7,16 @@ function key(parts) {
   return stableStringify(parts, 0);
 }
 
+const ISO_DATE_ONLY_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+function normalizeInclusivePeriod2(value) {
+  if (!value || !ISO_DATE_ONLY_RE.test(value)) return value;
+  const [year, month, day] = value.split('-').map(Number);
+  return new Date(Date.UTC(year, month - 1, day + 1)).toISOString();
+}
+
 function compactQuote(quote) {
+  if (!quote) return null;
   return {
     symbol: quote.symbol,
     shortName: quote.shortName || quote.longName || null,
@@ -27,6 +36,10 @@ function compactQuote(quote) {
   };
 }
 
+function normalizeDateTime(value) {
+  return value instanceof Date ? value.toISOString() : value ?? null;
+}
+
 function compactBar(bar) {
   return {
     date: bar.date instanceof Date ? bar.date.toISOString() : bar.date,
@@ -36,6 +49,26 @@ function compactBar(bar) {
     close: bar.close ?? null,
     volume: bar.volume ?? null,
     adjClose: bar.adjclose ?? bar.adjClose ?? null,
+  };
+}
+
+function compactOptionContract(contract, fallbackExpiration) {
+  return {
+    contractSymbol: contract.contractSymbol ?? null,
+    strike: contract.strike ?? null,
+    currency: contract.currency ?? null,
+    lastPrice: contract.lastPrice ?? null,
+    change: contract.change ?? null,
+    percentChange: contract.percentChange ?? null,
+    volume: contract.volume ?? null,
+    openInterest: contract.openInterest ?? null,
+    bid: contract.bid ?? null,
+    ask: contract.ask ?? null,
+    contractSize: contract.contractSize ?? null,
+    expiration: normalizeDateTime(contract.expiration ?? fallbackExpiration),
+    lastTradeDate: normalizeDateTime(contract.lastTradeDate),
+    impliedVolatility: contract.impliedVolatility ?? null,
+    inTheMoney: contract.inTheMoney ?? null,
   };
 }
 
@@ -99,17 +132,21 @@ function compactInsights(result) {
 }
 
 function compactOptions(result) {
-  const calls = Array.isArray(result?.calls) ? result.calls : [];
-  const puts = Array.isArray(result?.puts) ? result.puts : [];
+  const chain = Array.isArray(result?.options) ? result.options[0] : null;
+  const fallbackExpiration = chain?.expirationDate ?? null;
+  const calls = Array.isArray(chain?.calls) ? chain.calls : Array.isArray(result?.calls) ? result.calls : [];
+  const puts = Array.isArray(chain?.puts) ? chain.puts : Array.isArray(result?.puts) ? result.puts : [];
   return {
     underlyingSymbol: result?.underlyingSymbol || result?.symbol || null,
+    activeExpirationDate: normalizeDateTime(fallbackExpiration),
     expirationDates: Array.isArray(result?.expirationDates)
       ? result.expirationDates.map((d) => (d instanceof Date ? d.toISOString().slice(0, 10) : d))
       : [],
-    strikes: Array.isArray(result?.strikes) ? result.strikes.slice(0, 50) : [],
-    calls: calls.slice(0, 40),
-    puts: puts.slice(0, 40),
-    quote: result?.quote || null,
+    strikes: Array.isArray(result?.strikes) ? result.strikes : [],
+    calls: calls.map((contract) => compactOptionContract(contract, fallbackExpiration)),
+    puts: puts.map((contract) => compactOptionContract(contract, fallbackExpiration)),
+    quote: compactQuote(result?.quote),
+    hasMiniOptions: chain?.hasMiniOptions ?? result?.hasMiniOptions ?? null,
   };
 }
 
@@ -163,11 +200,12 @@ export class YahooMarketData extends MarketDataProvider {
   }
 
   async historical(symbol, { from, to, interval }) {
-    return this.cache.memo(key(['historical', symbol, from, to, interval]), async () => {
+    const normalizedTo = normalizeInclusivePeriod2(to);
+    return this.cache.memo(key(['historical', symbol, from, normalizedTo, interval]), async () => {
       try {
         const result = await this.yf.chart(symbol, {
           period1: from,
-          period2: to,
+          period2: normalizedTo,
           interval,
         });
         return (Array.isArray(result?.quotes) ? result.quotes : []).map(compactBar);

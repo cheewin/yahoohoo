@@ -41,6 +41,7 @@ export function loadConfig(overrides = {}) {
       cacheTtlMs: envInt('YAHOOHOO_CACHE_TTL_MS', 30_000),
       defaultLookbackDays: envInt('YAHOOHOO_DEFAULT_LOOKBACK_DAYS', 180),
       defaultBenchmark: process.env.YAHOOHOO_DEFAULT_BENCHMARK || 'SPY',
+      optionsMaxExpiries: envInt('YAHOOHOO_OPTIONS_MAX_EXPIRIES', 5),
       quoteSummaryModules: envList('YAHOOHOO_DEFAULT_SUMMARY_MODULES', [
         'price',
         'summaryDetail',

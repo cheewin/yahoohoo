@@ -4,7 +4,7 @@ const INTENT_PATTERNS = {
     minSymbols: 2,
   },
   options: {
-    hints: ['options', 'iv ', 'implied volatility', 'vol surface', 'skew', 'gamma', 'delta', 'vega', 'theta', 'open interest', 'put call', 'put/call', 'straddle', 'strangle', 'iron condor', 'term structure', 'vol smile'],
+    hints: ['options', 'iv ', 'implied volatility', 'vol surface', 'skew', 'gex', 'gamma exposure', 'gamma flip', 'gamma', 'delta', 'vega', 'theta', 'open interest', 'max pain', 'call wall', 'put wall', '0dte', '0 dte', 'zero dte', 'put call', 'put/call', 'straddle', 'strangle', 'iron condor', 'term structure', 'vol smile', 'dealer', 'positioning', 'sweep', 'expiry', 'expiries'],
   },
   fundamentals: {
     hints: ['fundamental', 'valuation', 'balance sheet', 'income statement', 'cash flow', 'earnings', 'revenue', 'multiple', 'pe ratio', 'p/e', 'market cap', 'margin', 'profit', 'roe', 'roa', 'debt', 'dividend', 'book value', 'eps', 'free cash flow', 'fcf'],

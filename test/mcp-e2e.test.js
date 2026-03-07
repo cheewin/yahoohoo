@@ -184,7 +184,8 @@ describe('MCP end-to-end', () => {
       assert.ok(toolNames.includes('yahoo_insights'));
       assert.ok(toolNames.includes('yahoohoo_peek'));
       assert.ok(toolNames.includes('yahoohoo_drill'));
-      assert.equal(toolNames.length, 11);
+      assert.ok(toolNames.includes('yahoohoo_options_dashboard'));
+      assert.equal(toolNames.length, 12);
     });
 
     it('tools have valid input schemas', async () => {

@@ -129,7 +129,36 @@ export class RecursiveMarketAnalyzer {
     const optionsPayload = plan.needsOptions
       ? Object.fromEntries(
           await Promise.all(
-            resolvedSymbols.map(async (symbol) => [symbol, await this.marketData.options(symbol)]),
+            resolvedSymbols.map(async (symbol) => {
+              const primary = await this.marketData.options(symbol);
+              // For options-focused queries, sweep multiple expiries
+              if (plan.intent.primary === 'options' && Array.isArray(primary.expirationDates) && primary.expirationDates.length > 1) {
+                const maxExpiries = this.config.market.optionsMaxExpiries || 5;
+                const primaryDateStr = primary.activeExpirationDate ? String(primary.activeExpirationDate).slice(0, 10) : null;
+                const startIdx = primaryDateStr ? primary.expirationDates.indexOf(primaryDateStr) + 1 : 1;
+                const additionalDates = primary.expirationDates.slice(startIdx > 0 ? startIdx : 1, (startIdx > 0 ? startIdx : 1) + maxExpiries - 1);
+                const chains = [{
+                  expirationDate: primaryDateStr || primary.expirationDates[0],
+                  calls: primary.calls,
+                  puts: primary.puts,
+                }];
+                const extras = await Promise.all(
+                  additionalDates.map(async (date) => {
+                    try {
+                      const chain = await this.marketData.options(symbol, date);
+                      return { expirationDate: date, calls: chain.calls, puts: chain.puts };
+                    } catch {
+                      return null;
+                    }
+                  }),
+                );
+                for (const extra of extras) {
+                  if (extra && (extra.calls.length || extra.puts.length)) chains.push(extra);
+                }
+                return [symbol, { ...primary, chains }];
+              }
+              return [symbol, primary];
+            }),
           ),
         )
       : {};

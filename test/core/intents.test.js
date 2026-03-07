@@ -13,6 +13,36 @@ describe('classifyIntent', () => {
     assert.equal(result.primary, 'options');
   });
 
+  it('detects degen options intent terms', () => {
+    const result = classifyIntent('Where is max pain and gex on SPY?', ['SPY']);
+    assert.equal(result.primary, 'options');
+  });
+
+  it('detects dealer positioning queries as options intent', () => {
+    const result = classifyIntent('what does dealer positioning look like on NVDA', ['NVDA']);
+    assert.equal(result.primary, 'options');
+  });
+
+  it('detects 0DTE queries as options intent', () => {
+    const result = classifyIntent('give me the 0dte dealer profile on SPY', ['SPY']);
+    assert.equal(result.primary, 'options');
+  });
+
+  it('detects zero dte variant as options intent', () => {
+    const result = classifyIntent('zero dte gamma exposure for QQQ', ['QQQ']);
+    assert.equal(result.primary, 'options');
+  });
+
+  it('detects expiry sweep queries as options intent', () => {
+    const result = classifyIntent('sweep the next 5 expiries for QQQ gamma flip', ['QQQ']);
+    assert.equal(result.primary, 'options');
+  });
+
+  it('detects call wall / put wall queries as options intent', () => {
+    const result = classifyIntent('where are the call wall and put wall on TSLA', ['TSLA']);
+    assert.equal(result.primary, 'options');
+  });
+
   it('detects fundamentals intent', () => {
     const result = classifyIntent('Show me AAPL valuation and earnings', ['AAPL']);
     assert.equal(result.primary, 'fundamentals');

@@ -198,13 +198,111 @@ def dedupe_symbols(values):
     return symbols
 
 
+def rank_scorecard(scorecard, field, *, reverse=True):
+    rows = [{'symbol': row['symbol'], 'value': row.get(field)} for row in scorecard if row.get(field) is not None]
+    if reverse:
+        rows.sort(key=lambda row: (-row['value'], row['symbol']))
+    else:
+        rows.sort(key=lambda row: (row['value'], row['symbol']))
+    return rows
+
+
+def total_return_from_rows(rows):
+    filtered = [row for row in rows if row.get('close') is not None]
+    closes = [row['close'] for row in filtered]
+    if len(closes) < 2 or not closes[0]:
+        return None
+    return (closes[-1] / closes[0]) - 1.0
+
+
+def build_cross_section(symbols, metrics, benchmark_symbol, benchmark_total_return):
+    scorecard = []
+    coverage_warnings = []
+
+    for symbol in symbols:
+        symbol_metrics = (metrics.get('symbols', {}).get(symbol, {}) or {})
+        history = symbol_metrics.get('history', {}) or {}
+        drawdown = symbol_metrics.get('drawdown', {}) or {}
+        tail = symbol_metrics.get('tail_risk', {}) or {}
+        bars = history.get('bars') or 0
+        total_return = history.get('total_return')
+        realized_vol = history.get('realized_vol_annualized')
+        max_drawdown = drawdown.get('max_drawdown')
+        scorecard.append({
+            'symbol': symbol,
+            'bars': bars,
+            'last_close': history.get('last_close'),
+            'total_return': total_return,
+            'realized_vol_annualized': realized_vol,
+            'downside_vol_annualized': history.get('downside_vol_annualized'),
+            'max_drawdown': max_drawdown,
+            'sharpe_ratio': history.get('sharpe_ratio'),
+            'sortino_ratio': history.get('sortino_ratio'),
+            'var_95': tail.get('var_95'),
+            'cvar_95': tail.get('cvar_95'),
+            'worst_day': tail.get('worst_day'),
+            'risk_adjusted_return': safe_div(total_return, realized_vol),
+            'return_over_drawdown': safe_div(total_return, abs(max_drawdown) if max_drawdown not in (None, 0) else None),
+            'excess_return_vs_benchmark': (
+                total_return - benchmark_total_return
+                if total_return is not None and benchmark_total_return is not None
+                else None
+            ),
+        })
+        if bars < 20:
+            coverage_warnings.append(f'{symbol} has limited history ({bars} bars) for risk metrics.')
+
+    rankings = {
+        'by_total_return': rank_scorecard(scorecard, 'total_return', reverse=True),
+        'by_sharpe': rank_scorecard(scorecard, 'sharpe_ratio', reverse=True),
+        'by_sortino': rank_scorecard(scorecard, 'sortino_ratio', reverse=True),
+        'by_risk_adjusted_return': rank_scorecard(scorecard, 'risk_adjusted_return', reverse=True),
+        'by_return_over_drawdown': rank_scorecard(scorecard, 'return_over_drawdown', reverse=True),
+        'by_lowest_volatility': rank_scorecard(scorecard, 'realized_vol_annualized', reverse=False),
+        'by_shallowest_drawdown': rank_scorecard(scorecard, 'max_drawdown', reverse=True),
+        'by_var_95': rank_scorecard(scorecard, 'var_95', reverse=True),
+        'by_cvar_95': rank_scorecard(scorecard, 'cvar_95', reverse=True),
+        'by_worst_day': rank_scorecard(scorecard, 'worst_day', reverse=True),
+    }
+    if benchmark_total_return is not None:
+        rankings['by_excess_return_vs_benchmark'] = rank_scorecard(scorecard, 'excess_return_vs_benchmark', reverse=True)
+
+    leaders = {}
+    mapping = {
+        'best_total_return': 'by_total_return',
+        'best_sharpe': 'by_sharpe',
+        'best_sortino': 'by_sortino',
+        'best_risk_adjusted_return': 'by_risk_adjusted_return',
+        'best_return_over_drawdown': 'by_return_over_drawdown',
+        'lowest_volatility': 'by_lowest_volatility',
+        'shallowest_drawdown': 'by_shallowest_drawdown',
+        'least_severe_var_95': 'by_var_95',
+        'least_severe_cvar_95': 'by_cvar_95',
+        'least_severe_worst_day': 'by_worst_day',
+        'best_excess_return_vs_benchmark': 'by_excess_return_vs_benchmark',
+    }
+    for leader_name, ranking_name in mapping.items():
+        ranking = rankings.get(ranking_name) or []
+        leaders[leader_name] = ranking[0] if ranking else None
+
+    return {
+        'symbol_count': len(symbols),
+        'benchmark_symbol': benchmark_symbol,
+        'benchmark_total_return': benchmark_total_return,
+        'scorecard': scorecard,
+        'rankings': rankings,
+        'leaders': leaders,
+        'coverage_warnings': coverage_warnings,
+    }
+
+
 # --- Main execution ---
 quotes = DATA.get('quotes', {})
 hist_data = DATA.get('history', {})
 benchmark = DATA.get('benchmark')
 
 symbols = dedupe_symbols(DATA.get('symbols', []))
-metrics = {'symbols': {}, 'benchmark': benchmark, 'comparisons': {}, 'correlation_matrix': None}
+metrics = {'symbols': {}, 'benchmark': benchmark, 'comparisons': {}, 'cross_section': None, 'pairwise': {}, 'correlation_matrix': {}}
 
 for symbol in symbols:
     hist = hist_data.get(symbol, [])
@@ -249,6 +347,7 @@ for symbol in symbols:
     }
 
 # Benchmark comparisons
+benchmark_total_return = total_return_from_rows(hist_data.get(benchmark, [])) if benchmark and benchmark in hist_data else None
 if benchmark and benchmark in hist_data:
     bench_rows = hist_data.get(benchmark, [])
     for symbol in symbols:
@@ -273,7 +372,6 @@ if benchmark and benchmark in hist_data:
 
 # Correlation matrix
 if len(symbols) > 1:
-    matrix = {}
     for i, sym_a in enumerate(symbols):
         for sym_b in symbols[i+1:]:
             rows_a = hist_data.get(sym_a, [])
@@ -283,7 +381,21 @@ if len(symbols) > 1:
             pairs = paired_returns(rows_a, rows_b)
             xs = [p[0] for p in pairs]
             ys = [p[1] for p in pairs]
-            matrix[f'{sym_a}_vs_{sym_b}'] = corr(xs, ys) if xs else None
-    metrics['correlation_matrix'] = matrix
+            key = f'{sym_a}_vs_{sym_b}'
+            correlation = corr(xs, ys) if xs else None
+            total_return_a = (metrics.get('symbols', {}).get(sym_a, {}) or {}).get('history', {}).get('total_return')
+            total_return_b = (metrics.get('symbols', {}).get(sym_b, {}) or {}).get('history', {}).get('total_return')
+            metrics['correlation_matrix'][key] = correlation
+            metrics['pairwise'][key] = {
+                'correlation': correlation,
+                'relative_return': (
+                    total_return_a - total_return_b
+                    if total_return_a is not None and total_return_b is not None
+                    else None
+                ),
+                'paired_observations': len(pairs),
+            }
+
+metrics['cross_section'] = build_cross_section(symbols, metrics, benchmark, benchmark_total_return)
 
 RESULT = metrics

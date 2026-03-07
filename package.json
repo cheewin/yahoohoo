@@ -7,6 +7,11 @@
   "bin": {
     "yahoohoo": "src/index.js"
   },
+  "files": [
+    "src/",
+    "README.md",
+    "LICENSE"
+  ],
   "scripts": {
     "start": "node src/index.js",
     "stdio": "node src/index.js --transport stdio",
@@ -26,7 +31,11 @@
     "sandbox",
     "agentic"
   ],
-  "author": "OpenAI for Hunter Bown",
+  "author": "Hunter Bown",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Hmbown/yahoohoo.git"
+  },
   "license": "MIT",
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.27.1",

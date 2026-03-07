@@ -80,6 +80,7 @@ describe('shouldFetchOptions', () => {
   it('returns true for options-related queries', () => {
     assert.equal(shouldFetchOptions('implied volatility skew'), true);
     assert.equal(shouldFetchOptions('options chain analysis'), true);
+    assert.equal(shouldFetchOptions('show me max pain and gex'), true);
   });
 
   it('returns false for unrelated queries', () => {
@@ -340,6 +341,165 @@ describe('renderDeterministicNarrative', () => {
     assert.ok(narrative.includes('total return: AAPL (18.00%) > MSFT (11.00%)'));
     assert.ok(narrative.includes('lowest volatility: MSFT (17.00%) > AAPL (22.00%)'));
     assert.ok(narrative.includes('coverage warning: MSFT has limited history (4 bars).'));
+  });
+
+  it('renders worst-day tail risk and correlation-matrix pairwise fallback', () => {
+    const node = {
+      question: 'tail risk deep dive',
+      symbols: ['AAPL', 'MSFT'],
+      range: { from: '2025-09-01', to: '2026-03-01' },
+      interval: '1d',
+      metrics: {
+        symbols: {
+          AAPL: {
+            history: { last_close: 180, total_return: 0.05, realized_vol_annualized: 0.25 },
+            tail_risk: { var_95: -0.02, cvar_95: -0.03, worst_day: -0.04 },
+          },
+          MSFT: {
+            history: { last_close: 400, total_return: 0.04, realized_vol_annualized: 0.20 },
+          },
+        },
+        comparisons: {},
+        correlation_matrix: {
+          AAPL_vs_MSFT: 0.75,
+        },
+      },
+      children: [],
+      reasoningNote: 'Used heuristic summarization because host sampling was unavailable.',
+    };
+
+    const narrative = renderDeterministicNarrative(node);
+    assert.ok(narrative.includes('worst day: -4.00%'));
+    assert.ok(narrative.includes('Pairwise:'));
+    assert.ok(narrative.includes('AAPL vs MSFT: corr=0.75'));
+  });
+
+  it('renders options wall, max-pain, and gex lines', () => {
+    const node = {
+      question: 'show me max pain and gex on AAPL',
+      symbols: ['AAPL'],
+      range: { from: '2025-09-01', to: '2026-03-01' },
+      interval: '1d',
+      metrics: {
+        symbols: {
+          AAPL: {
+            history: { last_close: 180, total_return: 0.05, realized_vol_annualized: 0.25 },
+            options: {
+              active_expiration: '2026-03-20',
+              put_call_oi_ratio: 0.88,
+              call_wall: { strike: 185, oi: 12000 },
+              put_wall: { strike: 175, oi: 14000 },
+              max_pain: { strike: 180, distance_from_spot_pct: 0 },
+              net_gex_1pct_move: 12500000,
+              gamma_flip: { level: 178.5, distance_from_spot_pct: -0.0083333333 },
+            },
+          },
+        },
+        comparisons: {},
+      },
+      children: [],
+      reasoningNote: 'Used heuristic summarization because host sampling was unavailable.',
+    };
+
+    const narrative = renderDeterministicNarrative(node);
+    assert.ok(narrative.includes('active expiration: 2026-03-20'));
+    assert.ok(narrative.includes('put/call OI ratio: 0.88'));
+    assert.ok(narrative.includes('call wall: 185.00 (OI 12,000)'));
+    assert.ok(narrative.includes('put wall: 175.00 (OI 14,000)'));
+    assert.ok(narrative.includes('max pain: 180.00'));
+    assert.ok(narrative.includes('net GEX (1% move): 12.50M'));
+    assert.ok(narrative.includes('gamma flip: 178.50'));
+  });
+
+  it('renders 0DTE, expiry sweep, and dealer profile in narrative', () => {
+    const node = {
+      question: 'show me 0dte dealer profile on SPY',
+      symbols: ['SPY'],
+      range: { from: '2025-09-01', to: '2026-03-07' },
+      interval: '1d',
+      metrics: {
+        symbols: {
+          SPY: {
+            history: { last_close: 500, total_return: 0.02, realized_vol_annualized: 0.15 },
+            options: {
+              active_expiration: '2026-03-07',
+              put_call_oi_ratio: 0.95,
+              call_wall: { strike: 505, oi: 20000 },
+              put_wall: { strike: 495, oi: 18000 },
+              max_pain: { strike: 500, distance_from_spot_pct: 0 },
+              net_gex_1pct_move: 25000000,
+              gamma_flip: { level: 498, distance_from_spot_pct: -0.004 },
+              zero_dte: {
+                expiry: '2026-03-07',
+                dte_days: 0,
+                sampled_calls: 5,
+                sampled_puts: 4,
+                net_gex_1pct_move: 8000000,
+                max_pain: { strike: 499, distance_from_spot_pct: -0.002 },
+              },
+              expiry_sweep: [
+                { expiry: '2026-03-07', dte_days: 0, total_open_interest: 65000, sampled_calls: 5, sampled_puts: 4 },
+                { expiry: '2026-03-14', dte_days: 7, total_open_interest: 34000, sampled_calls: 3, sampled_puts: 3 },
+                { expiry: '2026-03-21', dte_days: 14, total_open_interest: 11000, sampled_calls: 2, sampled_puts: 1 },
+              ],
+              dealer_profile: {
+                aggregate_net_gex: 30000000,
+                aggregate_gamma_flip: { level: 497.5, distance_from_spot_pct: -0.005 },
+                top_positive_gex_strikes: [{ strike: 505, value: 15000000 }],
+                top_negative_gex_strikes: [{ strike: 490, value: -12000000 }],
+              },
+            },
+          },
+        },
+        comparisons: {},
+      },
+      children: [],
+      reasoningNote: 'test',
+    };
+
+    const narrative = renderDeterministicNarrative(node);
+    // 0DTE section
+    assert.ok(narrative.includes('0DTE active: 2026-03-07'));
+    assert.ok(narrative.includes('0DTE net GEX'));
+    assert.ok(narrative.includes('0DTE max pain'));
+    // Expiry sweep highlights
+    assert.ok(narrative.includes('expiry sweep (3)'));
+    assert.ok(narrative.includes('2026-03-07'));
+    assert.ok(narrative.includes('2026-03-14'));
+    // Dealer profile
+    assert.ok(narrative.includes('dealer net GEX (agg)'));
+    assert.ok(narrative.includes('dealer gamma flip (agg)'));
+    assert.ok(narrative.includes('top +GEX strike'));
+    assert.ok(narrative.includes('top -GEX strike'));
+  });
+
+  it('renders 0DTE: none when sweep exists but no same-day', () => {
+    const node = {
+      question: 'sweep expiries on QQQ',
+      symbols: ['QQQ'],
+      range: { from: '2025-09-01', to: '2026-03-06' },
+      interval: '1d',
+      metrics: {
+        symbols: {
+          QQQ: {
+            history: { last_close: 450 },
+            options: {
+              active_expiration: '2026-03-14',
+              zero_dte: null,
+              expiry_sweep: [
+                { expiry: '2026-03-14', dte_days: 8, total_open_interest: 20000, sampled_calls: 3, sampled_puts: 2 },
+              ],
+            },
+          },
+        },
+        comparisons: {},
+      },
+      children: [],
+      reasoningNote: 'test',
+    };
+
+    const narrative = renderDeterministicNarrative(node);
+    assert.ok(narrative.includes('0DTE: none'));
   });
 });
 

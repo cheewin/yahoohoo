@@ -21,10 +21,24 @@ const OPTIONS_HINTS = [
   'implied volatility',
   'vol surface',
   'skew',
+  'gex',
+  'gamma exposure',
+  'gamma flip',
   'gamma',
   'delta',
   'open interest',
+  'max pain',
+  'call wall',
+  'put wall',
+  '0dte',
+  '0 dte',
+  'zero dte',
   'put call',
+  'dealer',
+  'positioning',
+  'sweep',
+  'expiry',
+  'expiries',
 ];
 
 const RISK_HINTS = [
@@ -224,10 +238,53 @@ export function renderDeterministicNarrative(node) {
     if (o.avg_iv != null) lines.push(`- avg IV: ${formatPct(o.avg_iv)}`);
     if (o.atm_iv != null) lines.push(`- ATM IV: ${formatPct(o.atm_iv)}`);
     if (o.skew != null) lines.push(`- put-call skew: ${formatPct(o.skew)}`);
+    if (o.active_expiration != null) lines.push(`- active expiration: ${o.active_expiration}`);
+    if (o.put_call_oi_ratio != null) lines.push(`- put/call OI ratio: ${formatScalar(o.put_call_oi_ratio)}`);
+    if (o.call_wall?.strike != null) lines.push(`- call wall: ${formatNumber(o.call_wall.strike)} (OI ${formatWholeNumber(o.call_wall.oi)})`);
+    if (o.put_wall?.strike != null) lines.push(`- put wall: ${formatNumber(o.put_wall.strike)} (OI ${formatWholeNumber(o.put_wall.oi)})`);
+    if (o.max_pain?.strike != null) {
+      const suffix = o.max_pain.distance_from_spot_pct != null ? ` (${formatPct(o.max_pain.distance_from_spot_pct)} vs spot)` : '';
+      lines.push(`- max pain: ${formatNumber(o.max_pain.strike)}${suffix}`);
+    }
+    if (o.net_gex_1pct_move != null) lines.push(`- net GEX (1% move): ${formatLargeNumber(o.net_gex_1pct_move)}`);
+    if (o.gamma_flip?.level != null) {
+      const suffix = o.gamma_flip.distance_from_spot_pct != null ? ` (${formatPct(o.gamma_flip.distance_from_spot_pct)} vs spot)` : '';
+      lines.push(`- gamma flip: ${formatNumber(o.gamma_flip.level)}${suffix}`);
+    }
+    // 0DTE section
+    if (o.zero_dte) {
+      lines.push(`- 0DTE active: ${o.zero_dte.expiry} (${o.zero_dte.sampled_calls + o.zero_dte.sampled_puts} contracts)`);
+      if (o.zero_dte.net_gex_1pct_move != null) lines.push(`  0DTE net GEX: ${formatLargeNumber(o.zero_dte.net_gex_1pct_move)}`);
+      if (o.zero_dte.max_pain?.strike != null) lines.push(`  0DTE max pain: ${formatNumber(o.zero_dte.max_pain.strike)}`);
+    } else if (o.expiry_sweep) {
+      lines.push(`- 0DTE: none`);
+    }
+    // Expiry sweep highlights (top 2-3)
+    if (Array.isArray(o.expiry_sweep) && o.expiry_sweep.length > 1) {
+      const highlights = o.expiry_sweep.slice(0, 3);
+      const parts = highlights.map((e) => `${e.expiry}(${e.dte_days ?? '?'}d, OI=${formatWholeNumber(e.total_open_interest || 0)})`);
+      lines.push(`- expiry sweep (${o.expiry_sweep.length}): ${parts.join(', ')}`);
+    }
+    // Dealer profile aggregate
+    if (o.dealer_profile) {
+      const dp = o.dealer_profile;
+      if (dp.aggregate_net_gex != null) lines.push(`- dealer net GEX (agg): ${formatLargeNumber(dp.aggregate_net_gex)}`);
+      if (dp.aggregate_gamma_flip?.level != null) {
+        const suffix = dp.aggregate_gamma_flip.distance_from_spot_pct != null ? ` (${formatPct(dp.aggregate_gamma_flip.distance_from_spot_pct)} vs spot)` : '';
+        lines.push(`- dealer gamma flip (agg): ${formatNumber(dp.aggregate_gamma_flip.level)}${suffix}`);
+      }
+      if (dp.top_positive_gex_strikes?.length) {
+        lines.push(`- top +GEX strike: ${formatNumber(dp.top_positive_gex_strikes[0].strike)} (${formatLargeNumber(dp.top_positive_gex_strikes[0].value)})`);
+      }
+      if (dp.top_negative_gex_strikes?.length) {
+        lines.push(`- top -GEX strike: ${formatNumber(dp.top_negative_gex_strikes[0].strike)} (${formatLargeNumber(dp.top_negative_gex_strikes[0].value)})`);
+      }
+    }
     const tail = metrics.tail_risk;
     if (tail) {
       if (tail.var_95 != null) lines.push(`- VaR 95%: ${formatPct(tail.var_95)}`);
       if (tail.cvar_95 != null) lines.push(`- CVaR 95%: ${formatPct(tail.cvar_95)}`);
+      if (tail.worst_day != null) lines.push(`- worst day: ${formatPct(tail.worst_day)}`);
     }
     const dd = metrics.drawdown;
     if (dd && dd.peak_date && dd.trough_date) {
@@ -248,7 +305,7 @@ export function renderDeterministicNarrative(node) {
     if (comparison.paired_observations != null) lines.push(`- paired observations: ${comparison.paired_observations}`);
   }
 
-  const pairwise = node.metrics?.pairwise || {};
+  const pairwise = getPairwiseMetrics(node.metrics);
   if (Object.keys(pairwise).length) {
     lines.push('');
     lines.push('Pairwise:');
@@ -308,8 +365,20 @@ function formatLargeNumber(value) {
   return formatNumber(number);
 }
 
+function formatWholeNumber(value) {
+  return Math.round(Number(value)).toLocaleString('en-US');
+}
+
 function humanizeComparisonName(name) {
   return String(name).replace(/_vs_/g, ' vs ');
+}
+
+function getPairwiseMetrics(metrics) {
+  if (metrics?.pairwise && Object.keys(metrics.pairwise).length) return metrics.pairwise;
+  const matrix = metrics?.correlation_matrix || {};
+  return Object.fromEntries(
+    Object.entries(matrix).map(([name, correlation]) => [name, { correlation }]),
+  );
 }
 
 function formatRanking(ranking, key) {

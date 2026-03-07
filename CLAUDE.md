@@ -11,7 +11,7 @@ Yahoohoo is an MCP server for market-data analysis. It combines Yahoo Finance da
 ```bash
 npm install                # install dependencies (Node 22+)
 npm run check              # syntax-check all source files
-npm test                   # run full test suite (182 deterministic tests, no network)
+npm test                   # run full test suite (205 deterministic tests, no network)
 npm run test:live          # run tests including live Yahoo Finance integration (184 total)
 npm run smoke:sandbox      # run sandbox smoke test via Python
 node src/index.js --transport stdio   # start in stdio mode
@@ -50,7 +50,7 @@ Three-layer design, all plain ESM JavaScript (no TypeScript, no bundler):
 `src/sandbox/programs/` — Versioned Python analysis programs loaded by intent:
 - `market_metrics.py` — General single/multi-symbol metrics (default)
 - `comparison.py` — Cross-symbol comparison with pairwise matrix, tracking error, information ratio, capture ratios, regime labels
-- `options_analysis.py` — IV stats, skew, ATM IV, put/call ratios, OI concentration, IV vs realized vol
+- `options_analysis.py` — IV stats, skew, ATM IV, put/call ratios, OI concentration, IV vs realized vol, multi-expiry sweep, 0DTE detection, aggregate dealer-position proxy
 - `fundamentals.py` — Deep valuation comps, profitability, growth, balance sheet, capital allocation
 - `risk_analysis.py` — VaR/CVaR, tail risk, rolling vol, drawdown detail, stress detection, correlation matrix
 
@@ -75,7 +75,7 @@ Three-layer design, all plain ESM JavaScript (no TypeScript, no bundler):
 
 ## Key design decisions
 
-- Test suite uses `node:test` (built-in, no deps) — `npm test` runs 182 deterministic tests covering lib (cache, dates, json, config, errors, runStore), heuristics (confidence), intents, programs, sandbox (all programs), sampling, analyzer (confidence, intent-aware children), adapters (provider abstraction), HTTP transport (auth/rate-limit/session-limits), and MCP E2E (session lifecycle, tool calls, prompts, resources, errors); `npm run test:live` adds live Yahoo Finance integration coverage
+- Test suite uses `node:test` (built-in, no deps) — `npm test` runs 205 deterministic tests covering lib (cache, dates, json, config, errors, runStore), heuristics (confidence), intents, programs, sandbox (all programs), sampling, analyzer (confidence, intent-aware children), adapters (provider abstraction), HTTP transport (auth/rate-limit/session-limits), and MCP E2E (session lifecycle, tool calls, prompts, resources, errors); `npm run test:live` adds live Yahoo Finance integration coverage
 - The sandbox blocks dangerous imports, `eval`/`exec`/`open`, and applies resource limits where Python's `resource` module is available. It is **not** VM-level isolation.
 - Tool input schemas use Zod 4 (`z.object(...)`) registered via `server.registerTool()`
 - Config is purely env-var driven — no config files. See `src/lib/config.js` for all `YAHOOHOO_*` variables.

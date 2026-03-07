@@ -19,7 +19,7 @@ You have access to Yahoohoo MCP tools for live market data analysis. Use the RLM
 - `yahoo_quote` — Current price snapshots
 - `yahoo_historical` — OHLCV bars (use summary=true for stats instead of raw bars)
 - `yahoo_quote_summary` — Company fundamentals
-- `yahoo_options` — Option chain snapshot (note: calls/puts arrays are empty upstream)
+- `yahoo_options` — Option chain snapshot (use expiries > 1 to sweep multiple expiry dates)
 
 ## RLM Workflow
 
@@ -32,14 +32,18 @@ You have access to Yahoohoo MCP tools for live market data analysis. Use the RLM
 
 After analyze, peek into stored data:
 ```
-metrics.symbols.<SYM>.history        — bars, return, vol, drawdown
-metrics.symbols.<SYM>.tail_risk      — VaR, CVaR, skew, kurtosis
-metrics.symbols.<SYM>.drawdown       — max drawdown, peak/trough dates
-metrics.cross_section.rankings       — by_total_return, by_sharpe, etc.
-metrics.cross_section.leaders        — best in each category
-metrics.comparisons.<SYM>_vs_SPY     — beta, correlation, capture ratios
-metrics.pairwise                     — pairwise correlations
-children                             — child analysis nodes
+metrics.symbols.<SYM>.history            — bars, return, vol, drawdown
+metrics.symbols.<SYM>.tail_risk          — VaR, CVaR, skew, kurtosis
+metrics.symbols.<SYM>.drawdown           — max drawdown, peak/trough dates
+metrics.symbols.<SYM>.options            — IV, walls, max pain, GEX, gamma flip
+metrics.symbols.<SYM>.options.zero_dte   — 0DTE metrics (null if none)
+metrics.symbols.<SYM>.options.expiry_sweep — per-expiry metrics array
+metrics.symbols.<SYM>.options.dealer_profile — aggregate dealer-position proxy
+metrics.cross_section.rankings           — by_total_return, by_sharpe, etc.
+metrics.cross_section.leaders            — best in each category
+metrics.comparisons.<SYM>_vs_SPY         — beta, correlation, capture ratios
+metrics.pairwise                         — pairwise correlations
+children                                 — child analysis nodes
 ```
 
 ## Key Points
@@ -49,3 +53,6 @@ children                             — child analysis nodes
 - Confidence scores range 0-1 based on data completeness and sandbox success
 - Multi-timeframe: auto-runs daily + weekly when no interval specified
 - Intent classification: comparison, risk, options, fundamentals, general
+- Options analysis: auto-sweeps up to 5 expiries for options-intent queries
+- Dealer profile: aggregate GEX, gamma flip, max-pain ladder across expiries (proxy, not exact inventory)
+- 0DTE: detected when a same-day expiry exists relative to the analysis reference date

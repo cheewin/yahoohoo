@@ -39,10 +39,12 @@ function makeMockMarketData(fixture = {}) {
       expirationDates: ['2026-04-01'],
       strikes: [100, 105, 110],
       calls: [
-        { strike: 110, impliedVolatility: 0.3, openInterest: 5000 },
+        { strike: 105, impliedVolatility: 0.28, openInterest: 7000, volume: 400, expiration: '2026-04-01T00:00:00Z', contractSize: 'REGULAR' },
+        { strike: 110, impliedVolatility: 0.3, openInterest: 5000, volume: 300, expiration: '2026-04-01T00:00:00Z', contractSize: 'REGULAR' },
       ],
       puts: [
-        { strike: 110, impliedVolatility: 0.32, openInterest: 3000 },
+        { strike: 100, impliedVolatility: 0.34, openInterest: 6000, volume: 350, expiration: '2026-04-01T00:00:00Z', contractSize: 'REGULAR' },
+        { strike: 105, impliedVolatility: 0.32, openInterest: 3000, volume: 200, expiration: '2026-04-01T00:00:00Z', contractSize: 'REGULAR' },
       ],
       quote: null,
     }),
@@ -156,6 +158,25 @@ describe('RecursiveMarketAnalyzer', () => {
     assert.ok(result.metrics.symbols.AAPL.fundamentals);
   });
 
+  it('routes max-pain and gex queries to options analysis', async () => {
+    const sandbox = new PythonSandbox({ config, logger });
+    const marketData = makeMockMarketData();
+    const analyzer = new RecursiveMarketAnalyzer({ config, logger, marketData, sandbox });
+
+    const result = await analyzer.analyze({
+      query: 'show me max pain and gex on AAPL',
+      symbols: ['AAPL'],
+      reasoningMode: 'heuristic',
+      maxDepth: 0,
+    });
+
+    assert.equal(result.program, 'options_analysis');
+    assert.ok(result.metrics.symbols.AAPL.options.max_pain);
+    assert.ok(result.metrics.symbols.AAPL.options.net_gex_1pct_move != null);
+    assert.ok(result.summary.includes('max pain'));
+    assert.ok(result.summary.includes('net GEX'));
+  });
+
   it('includes confidence score in results', async () => {
     const sandbox = new PythonSandbox({ config, logger });
     const marketData = makeMockMarketData();
@@ -189,6 +210,87 @@ describe('RecursiveMarketAnalyzer', () => {
       assert.ok(child.program, 'child has program field');
       assert.ok(child.intent, 'child has intent field');
     }
+  });
+
+  it('emits cross-section and pairwise metrics for risk studies', async () => {
+    const sandbox = new PythonSandbox({ config, logger });
+    const marketData = makeMockMarketData();
+    const analyzer = new RecursiveMarketAnalyzer({ config, logger, marketData, sandbox });
+
+    const result = await analyzer.analyze({
+      query: 'tail risk volatility drawdown beta for AAPL and MSFT',
+      symbols: ['AAPL', 'MSFT'],
+      reasoningMode: 'heuristic',
+      maxDepth: 0,
+    });
+
+    assert.equal(result.program, 'risk_analysis');
+    assert.equal(result.metrics.cross_section.symbol_count, 2);
+    assert.ok(result.metrics.pairwise.AAPL_vs_MSFT);
+    assert.ok(result.summary.includes('Comparison snapshot'));
+  });
+
+  it('fetches multi-expiry chains for options queries and builds sweep', async () => {
+    const sandbox = new PythonSandbox({ config, logger });
+    let optionsCallCount = 0;
+    const marketData = {
+      ...makeMockMarketData(),
+      options: async (symbol, date) => {
+        optionsCallCount++;
+        const expirationDate = date || '2026-04-01';
+        return {
+          underlyingSymbol: symbol,
+          activeExpirationDate: `${expirationDate}T00:00:00.000Z`,
+          expirationDates: ['2026-04-01', '2026-04-08', '2026-04-15', '2026-04-22', '2026-04-29', '2026-05-06'],
+          strikes: [100, 105, 110],
+          calls: [
+            { strike: 105, impliedVolatility: 0.28, openInterest: 7000, volume: 400, expiration: `${expirationDate}T00:00:00Z`, contractSize: 'REGULAR' },
+            { strike: 110, impliedVolatility: 0.3, openInterest: 5000, volume: 300, expiration: `${expirationDate}T00:00:00Z`, contractSize: 'REGULAR' },
+          ],
+          puts: [
+            { strike: 100, impliedVolatility: 0.34, openInterest: 6000, volume: 350, expiration: `${expirationDate}T00:00:00Z`, contractSize: 'REGULAR' },
+            { strike: 105, impliedVolatility: 0.32, openInterest: 3000, volume: 200, expiration: `${expirationDate}T00:00:00Z`, contractSize: 'REGULAR' },
+          ],
+          quote: null,
+        };
+      },
+    };
+    const analyzer = new RecursiveMarketAnalyzer({ config, logger, marketData, sandbox });
+
+    const result = await analyzer.analyze({
+      query: 'sweep the next 5 expiries for AAPL gamma flip',
+      symbols: ['AAPL'],
+      reasoningMode: 'heuristic',
+      maxDepth: 0,
+    });
+
+    assert.equal(result.program, 'options_analysis');
+    assert.ok(result.metrics.symbols.AAPL.options);
+    const opts = result.metrics.symbols.AAPL.options;
+    // Multi-expiry sweep should be present
+    assert.ok(Array.isArray(opts.expiry_sweep));
+    assert.ok(opts.expiry_sweep.length > 1);
+    // Dealer profile should be present
+    assert.ok(opts.dealer_profile != null);
+    assert.ok(opts.dealer_profile.aggregate_net_gex != null);
+    // Fetched multiple expiry dates (primary + additional)
+    assert.ok(optionsCallCount > 1, `expected multiple options calls, got ${optionsCallCount}`);
+  });
+
+  it('routes 0DTE dealer profile queries to options analysis', async () => {
+    const sandbox = new PythonSandbox({ config, logger });
+    const marketData = makeMockMarketData();
+    const analyzer = new RecursiveMarketAnalyzer({ config, logger, marketData, sandbox });
+
+    const result = await analyzer.analyze({
+      query: 'give me the 0dte dealer profile on AAPL',
+      symbols: ['AAPL'],
+      reasoningMode: 'heuristic',
+      maxDepth: 0,
+    });
+
+    assert.equal(result.program, 'options_analysis');
+    assert.ok(result.metrics.symbols.AAPL.options);
   });
 
   it('handles sandbox failure gracefully', async () => {

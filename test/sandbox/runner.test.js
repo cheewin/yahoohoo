@@ -231,7 +231,7 @@ describe('sandbox runner', () => {
   });
 
   describe('options_analysis program', () => {
-    it('executes options analysis with IV metrics', () => {
+    it('executes options analysis with IV, max pain, and gex metrics', () => {
       const code = fs.readFileSync('src/sandbox/programs/options_analysis.py', 'utf-8');
       const result = runSandbox({
         code,
@@ -251,14 +251,15 @@ describe('sandbox runner', () => {
           options: {
             AAPL: {
               calls: [
-                { strike: 185, impliedVolatility: 0.28, openInterest: 5000, volume: 200 },
-                { strike: 190, impliedVolatility: 0.30, openInterest: 3000, volume: 100 },
+                { strike: 180, impliedVolatility: 0.29, openInterest: 8000, volume: 250, expiration: '2026-03-20T00:00:00Z', contractSize: 'REGULAR' },
+                { strike: 185, impliedVolatility: 0.28, openInterest: 5000, volume: 200, expiration: '2026-03-20T00:00:00Z', contractSize: 'REGULAR' },
+                { strike: 190, impliedVolatility: 0.30, openInterest: 3000, volume: 100, expiration: '2026-03-20T00:00:00Z', contractSize: 'REGULAR' },
               ],
               puts: [
-                { strike: 175, impliedVolatility: 0.32, openInterest: 4000, volume: 150 },
-                { strike: 170, impliedVolatility: 0.35, openInterest: 2000, volume: 80 },
+                { strike: 175, impliedVolatility: 0.32, openInterest: 7000, volume: 150, expiration: '2026-03-20T00:00:00Z', contractSize: 'REGULAR' },
+                { strike: 170, impliedVolatility: 0.35, openInterest: 6000, volume: 80, expiration: '2026-03-20T00:00:00Z', contractSize: 'REGULAR' },
               ],
-              expirationDates: ['2026-02-20', '2026-03-20'],
+              expirationDates: ['2026-03-20', '2026-04-17'],
             },
           },
         },
@@ -268,11 +269,207 @@ describe('sandbox runner', () => {
       assert.equal(result.ok, true);
       const opts = result.result.symbols.AAPL.options;
       assert.ok(opts);
-      assert.equal(opts.sampled_calls, 2);
+      assert.equal(opts.sampled_calls, 3);
       assert.equal(opts.sampled_puts, 2);
       assert.ok(opts.avg_iv > 0);
       assert.ok(opts.total_open_interest > 0);
       assert.ok(opts.put_call_oi_ratio > 0);
+      assert.equal(opts.call_wall.strike, 180);
+      assert.equal(opts.put_wall.strike, 175);
+      assert.ok(opts.max_pain.strike != null);
+      assert.ok(opts.net_gex_1pct_move != null);
+      assert.ok(opts.top_abs_gex_strikes.length > 0);
+      // GEX by-strike data for dashboard
+      assert.ok(opts._gex_by_strike != null);
+      assert.ok(typeof opts._gex_by_strike === 'object');
+      assert.ok(Object.keys(opts._gex_by_strike).length > 0);
+      // Dashboard generated
+      assert.ok(opts._dashboard != null);
+      assert.ok(typeof opts._dashboard === 'string');
+      assert.ok(opts._dashboard.includes('AAPL OPTIONS DASHBOARD'));
+      assert.ok(opts._dashboard.includes('Key Levels'));
+      assert.ok(opts._dashboard.includes('GEX Profile'));
+      assert.ok(opts._dashboard.includes('Spot Price'));
+      // Backward compat: no chains provided → multi-expiry fields are null
+      assert.equal(opts.zero_dte, null);
+      assert.equal(opts.expiry_sweep, null);
+      assert.equal(opts.dealer_profile, null);
+    });
+
+    it('computes multi-expiry sweep with per-expiry metrics', () => {
+      const code = fs.readFileSync('src/sandbox/programs/options_analysis.py', 'utf-8');
+      const result = runSandbox({
+        code,
+        input_data: {
+          symbols: ['SPY'],
+          benchmark: null,
+          quotes: { SPY: { symbol: 'SPY', regularMarketPrice: 500 } },
+          history: {
+            SPY: [
+              { date: '2026-03-03T00:00:00Z', close: 495, volume: 2000000 },
+              { date: '2026-03-04T00:00:00Z', close: 497, volume: 2100000 },
+              { date: '2026-03-05T00:00:00Z', close: 498, volume: 2200000 },
+              { date: '2026-03-06T00:00:00Z', close: 499, volume: 2000000 },
+              { date: '2026-03-07T00:00:00Z', close: 500, volume: 2300000 },
+            ],
+          },
+          options: {
+            SPY: {
+              calls: [
+                { strike: 500, impliedVolatility: 0.18, openInterest: 20000, volume: 5000, expiration: '2026-03-07T00:00:00Z', contractSize: 'REGULAR' },
+                { strike: 505, impliedVolatility: 0.19, openInterest: 15000, volume: 3000, expiration: '2026-03-07T00:00:00Z', contractSize: 'REGULAR' },
+              ],
+              puts: [
+                { strike: 495, impliedVolatility: 0.22, openInterest: 18000, volume: 4000, expiration: '2026-03-07T00:00:00Z', contractSize: 'REGULAR' },
+                { strike: 490, impliedVolatility: 0.25, openInterest: 12000, volume: 2000, expiration: '2026-03-07T00:00:00Z', contractSize: 'REGULAR' },
+              ],
+              expirationDates: ['2026-03-07', '2026-03-14', '2026-03-21'],
+              chains: [
+                {
+                  expirationDate: '2026-03-07',
+                  calls: [
+                    { strike: 500, impliedVolatility: 0.18, openInterest: 20000, volume: 5000, expiration: '2026-03-07T00:00:00Z', contractSize: 'REGULAR' },
+                    { strike: 505, impliedVolatility: 0.19, openInterest: 15000, volume: 3000, expiration: '2026-03-07T00:00:00Z', contractSize: 'REGULAR' },
+                  ],
+                  puts: [
+                    { strike: 495, impliedVolatility: 0.22, openInterest: 18000, volume: 4000, expiration: '2026-03-07T00:00:00Z', contractSize: 'REGULAR' },
+                    { strike: 490, impliedVolatility: 0.25, openInterest: 12000, volume: 2000, expiration: '2026-03-07T00:00:00Z', contractSize: 'REGULAR' },
+                  ],
+                },
+                {
+                  expirationDate: '2026-03-14',
+                  calls: [
+                    { strike: 500, impliedVolatility: 0.20, openInterest: 10000, volume: 2000, expiration: '2026-03-14T00:00:00Z', contractSize: 'REGULAR' },
+                    { strike: 510, impliedVolatility: 0.21, openInterest: 8000, volume: 1500, expiration: '2026-03-14T00:00:00Z', contractSize: 'REGULAR' },
+                  ],
+                  puts: [
+                    { strike: 495, impliedVolatility: 0.24, openInterest: 9000, volume: 1800, expiration: '2026-03-14T00:00:00Z', contractSize: 'REGULAR' },
+                    { strike: 490, impliedVolatility: 0.26, openInterest: 7000, volume: 1200, expiration: '2026-03-14T00:00:00Z', contractSize: 'REGULAR' },
+                  ],
+                },
+                {
+                  expirationDate: '2026-03-21',
+                  calls: [
+                    { strike: 505, impliedVolatility: 0.22, openInterest: 6000, volume: 1000, expiration: '2026-03-21T00:00:00Z', contractSize: 'REGULAR' },
+                  ],
+                  puts: [
+                    { strike: 495, impliedVolatility: 0.26, openInterest: 5000, volume: 800, expiration: '2026-03-21T00:00:00Z', contractSize: 'REGULAR' },
+                  ],
+                },
+              ],
+            },
+          },
+        },
+        settings: {},
+      });
+
+      assert.equal(result.ok, true);
+      const opts = result.result.symbols.SPY.options;
+
+      // Expiry sweep
+      assert.ok(Array.isArray(opts.expiry_sweep));
+      assert.equal(opts.expiry_sweep.length, 3);
+      // Sorted by DTE (nearest first)
+      assert.equal(opts.expiry_sweep[0].expiry, '2026-03-07');
+      assert.equal(opts.expiry_sweep[0].dte_days, 0); // same-day
+      assert.equal(opts.expiry_sweep[1].expiry, '2026-03-14');
+      assert.equal(opts.expiry_sweep[1].dte_days, 7);
+      assert.equal(opts.expiry_sweep[2].expiry, '2026-03-21');
+      assert.equal(opts.expiry_sweep[2].dte_days, 14);
+
+      // Per-expiry metrics present
+      for (const entry of opts.expiry_sweep) {
+        assert.ok(entry.sampled_calls >= 1);
+        assert.ok(entry.sampled_puts >= 1);
+        assert.ok(entry.total_open_interest > 0);
+        assert.ok(entry.put_call_oi_ratio != null);
+        assert.ok(entry.call_wall != null);
+        assert.ok(entry.put_wall != null);
+        assert.ok(entry.max_pain != null);
+        assert.ok(entry.net_gex_1pct_move != null);
+        assert.ok(entry.call_gex_1pct_move != null);
+        assert.ok(entry.put_gex_1pct_move != null);
+      }
+
+      // 0DTE detection (last history bar is 2026-03-07, first chain is 2026-03-07)
+      assert.ok(opts.zero_dte != null);
+      assert.equal(opts.zero_dte.expiry, '2026-03-07');
+      assert.equal(opts.zero_dte.dte_days, 0);
+      assert.ok(opts.zero_dte.net_gex_1pct_move != null);
+
+      // Dealer profile
+      assert.ok(opts.dealer_profile != null);
+      assert.equal(opts.dealer_profile.expiries_included, 3);
+      assert.ok(opts.dealer_profile.aggregate_net_gex != null);
+      assert.ok(opts.dealer_profile.aggregate_call_gex != null);
+      assert.ok(opts.dealer_profile.aggregate_put_gex != null);
+      assert.ok(opts.dealer_profile.label.includes('proxy'));
+      assert.ok(Array.isArray(opts.dealer_profile.max_pain_ladder));
+      assert.equal(opts.dealer_profile.max_pain_ladder.length, 3);
+      assert.ok(Array.isArray(opts.dealer_profile.by_expiry));
+      assert.equal(opts.dealer_profile.by_expiry.length, 3);
+      // Dealer profile has aggregate by_strike
+      assert.ok(opts.dealer_profile._gex_by_strike != null);
+
+      // Multi-expiry dashboard
+      assert.ok(opts._dashboard != null);
+      assert.ok(typeof opts._dashboard === 'string');
+      assert.ok(opts._dashboard.includes('SPY OPTIONS DASHBOARD'));
+      assert.ok(opts._dashboard.includes('Key Levels'));
+      assert.ok(opts._dashboard.includes('GEX Profile'));
+      assert.ok(opts._dashboard.includes('Expiry Sweep'));
+      assert.ok(opts._dashboard.includes('Dealer Profile'));
+      assert.ok(opts._dashboard.includes('IV Term Structure'));
+      assert.ok(opts._dashboard.includes('0DTE'));
+    });
+
+    it('sets zero_dte to null when no same-day expiry exists', () => {
+      const code = fs.readFileSync('src/sandbox/programs/options_analysis.py', 'utf-8');
+      const result = runSandbox({
+        code,
+        input_data: {
+          symbols: ['QQQ'],
+          benchmark: null,
+          quotes: { QQQ: { symbol: 'QQQ', regularMarketPrice: 450 } },
+          history: {
+            QQQ: [
+              { date: '2026-03-05T00:00:00Z', close: 448, volume: 1500000 },
+              { date: '2026-03-06T00:00:00Z', close: 450, volume: 1600000 },
+            ],
+          },
+          options: {
+            QQQ: {
+              calls: [
+                { strike: 450, impliedVolatility: 0.22, openInterest: 10000, volume: 2000, expiration: '2026-03-14T00:00:00Z', contractSize: 'REGULAR' },
+              ],
+              puts: [
+                { strike: 445, impliedVolatility: 0.25, openInterest: 8000, volume: 1500, expiration: '2026-03-14T00:00:00Z', contractSize: 'REGULAR' },
+              ],
+              expirationDates: ['2026-03-14', '2026-03-21'],
+              chains: [
+                {
+                  expirationDate: '2026-03-14',
+                  calls: [{ strike: 450, impliedVolatility: 0.22, openInterest: 10000, volume: 2000, expiration: '2026-03-14T00:00:00Z', contractSize: 'REGULAR' }],
+                  puts: [{ strike: 445, impliedVolatility: 0.25, openInterest: 8000, volume: 1500, expiration: '2026-03-14T00:00:00Z', contractSize: 'REGULAR' }],
+                },
+                {
+                  expirationDate: '2026-03-21',
+                  calls: [{ strike: 455, impliedVolatility: 0.23, openInterest: 5000, volume: 1000, expiration: '2026-03-21T00:00:00Z', contractSize: 'REGULAR' }],
+                  puts: [{ strike: 440, impliedVolatility: 0.27, openInterest: 4000, volume: 800, expiration: '2026-03-21T00:00:00Z', contractSize: 'REGULAR' }],
+                },
+              ],
+            },
+          },
+        },
+        settings: {},
+      });
+
+      assert.equal(result.ok, true);
+      const opts = result.result.symbols.QQQ.options;
+      assert.equal(opts.zero_dte, null); // No same-day expiry
+      assert.ok(Array.isArray(opts.expiry_sweep));
+      assert.equal(opts.expiry_sweep.length, 2);
+      assert.ok(opts.dealer_profile != null);
     });
   });
 
@@ -331,6 +528,9 @@ describe('sandbox runner', () => {
       assert.ok(result.result.symbols.AAPL.drawdown);
       assert.ok(result.result.symbols.AAPL.rolling_vol);
       assert.ok(result.result.comparisons.AAPL_vs_SPY);
+      assert.ok(result.result.cross_section);
+      assert.equal(result.result.cross_section.symbol_count, 2);
+      assert.ok(result.result.pairwise.AAPL_vs_MSFT);
 
       // Correlation matrix for multi-symbol
       assert.ok(result.result.correlation_matrix);
