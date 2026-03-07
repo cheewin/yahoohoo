@@ -394,6 +394,10 @@ export function registerTools({ server, marketData, analyzer, runStore, config }
       }
       const value = getByPath(analysis, path) ?? getCompatPath(analysis, path);
       if (value === undefined) return textResult(`Path "${path}" not found in run ${runId}.`);
+      // Dashboard paths return pre-formatted ASCII — instruct host to display verbatim
+      if (path.endsWith('_dashboard') && typeof value === 'string') {
+        return textResult(`[Display this verbatim in a code block]\n\n${value}`);
+      }
       const text = typeof value === 'object' ? JSON.stringify(value, null, 2) : String(value);
       // Truncate if too large to keep context clean
       if (text.length > 4000) {
@@ -457,7 +461,7 @@ export function registerTools({ server, marketData, analyzer, runStore, config }
     {
       title: 'Options Dashboard',
       description:
-        'Visual ASCII options dashboard: GEX profile chart, key levels, expiry sweep, IV term structure, dealer positioning. Like thinkorswim options analysis. Provide a symbol for fresh analysis or a runId to extract from a stored run.',
+        'Visual ASCII options dashboard: GEX profile chart, key levels, expiry sweep, IV term structure, dealer positioning. Like thinkorswim options analysis. Provide a symbol for fresh analysis or a runId to extract from a stored run. IMPORTANT: The output is pre-formatted ASCII art. Always display the FULL output verbatim inside a code block — do not summarize or paraphrase.',
       inputSchema: z.object({
         symbol: z.string().min(1).optional().describe('Symbol to analyze (required if no runId)'),
         expiries: z.number().int().min(1).max(12).default(5).describe('Number of expiry dates to sweep'),
@@ -472,7 +476,7 @@ export function registerTools({ server, marketData, analyzer, runStore, config }
         const targetSym = symbol?.toUpperCase() || syms[0];
         const dashboard = run.analysis.metrics?.symbols?.[targetSym]?.options?._dashboard;
         if (!dashboard) return textResult(`No dashboard for ${targetSym} in run ${runId}. Run with includeOptions=true.`);
-        return textResult(dashboard);
+        return textResult(`[Display this verbatim in a code block]\n\n${dashboard}`);
       }
 
       if (!symbol) return textResult('Provide a symbol or runId.');
@@ -490,7 +494,7 @@ export function registerTools({ server, marketData, analyzer, runStore, config }
       const rid = runStore.save(analysis);
       const dashboard = analysis.metrics?.symbols?.[sym]?.options?._dashboard;
       if (!dashboard) return textResult(`No options data available for ${sym}.`);
-      return textResult(`${dashboard}\n\n[run: ${rid}] [confidence: ${analysis.confidence}]`);
+      return textResult(`[Display this verbatim in a code block]\n\n${dashboard}\n\n[run: ${rid}] [confidence: ${analysis.confidence}]`);
     },
   );
 
