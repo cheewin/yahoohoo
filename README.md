@@ -23,7 +23,7 @@ yahoohoo --transport stdio
 
 Requires Node 22+ and Python 3.
 
-## Host setup
+## Host Setup
 
 **Claude Code**
 
@@ -144,7 +144,7 @@ Pairwise:
 - [Architecture](docs/ARCHITECTURE.md) — three-layer design, data flow, and transport strategy
 - [Configuration](docs/CONFIG.md) — environment variables, HTTP mode, and deployment
 - [Security](docs/SECURITY.md) — sandbox threat model and limitations
-- [ChatGPT setup](docs/CHATGPT.md) — running in HTTP mode for remote hosts
+- [ChatGPT Setup](docs/CHATGPT.md) — running in HTTP mode for remote hosts
 
 ## Caveats
 
