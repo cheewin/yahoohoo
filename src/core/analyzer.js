@@ -104,15 +104,24 @@ export class RecursiveMarketAnalyzer {
     await emitProgress(ctx, { progress: 0, total: totalSteps, message: `Fetching data for ${resolvedSymbols.join(', ')}…` });
 
     const quotes = await this.marketData.quote(plan.historySymbols);
+    const dataErrors = Object.entries(quotes).filter(([, value]) => value.error)
+      .map(([symbol, value]) => ({ symbol, operation: 'quote', error: value.error }));
+    const fetchPartial = async (symbol, operation, callback, fallback) => {
+      try { return await callback(); }
+      catch (error) {
+        dataErrors.push({ symbol, operation, error: error.message });
+        return fallback;
+      }
+    };
     const history = Object.fromEntries(
       await Promise.all(
         plan.historySymbols.map(async (symbol) => [
           symbol,
-          await this.marketData.historical(symbol, {
+          await fetchPartial(symbol, 'historical', () => this.marketData.historical(symbol, {
             from: plan.range.from,
             to: plan.range.to,
             interval: plan.interval,
-          }),
+          }), []),
         ]),
       ),
     );
@@ -122,7 +131,7 @@ export class RecursiveMarketAnalyzer {
           await Promise.all(
             resolvedSymbols.map(async (symbol) => [
               symbol,
-              await this.marketData.quoteSummary(symbol, this.config.market.quoteSummaryModules),
+              await fetchPartial(symbol, 'quoteSummary', () => this.marketData.quoteSummary(symbol, this.config.market.quoteSummaryModules), {}),
             ]),
           ),
         )
@@ -132,7 +141,7 @@ export class RecursiveMarketAnalyzer {
       ? Object.fromEntries(
           await Promise.all(
             resolvedSymbols.map(async (symbol) => {
-              const primary = await this.marketData.options(symbol);
+              const primary = await fetchPartial(symbol, 'options', () => this.marketData.options(symbol), { calls: [], puts: [], expirationDates: [] });
               // For options-focused queries, sweep multiple expiries
               if (plan.intent.primary === 'options' && Array.isArray(primary.expirationDates) && primary.expirationDates.length > 1) {
                 const maxExpiries = this.config.market.optionsMaxExpiries || 5;
@@ -150,6 +159,7 @@ export class RecursiveMarketAnalyzer {
                       const chain = await this.marketData.options(symbol, date);
                       return { expirationDate: date, calls: chain.calls, puts: chain.puts };
                     } catch {
+                      dataErrors.push({ symbol, operation: 'options', error: `Expiry ${date} unavailable` });
                       return null;
                     }
                   }),
@@ -232,7 +242,7 @@ export class RecursiveMarketAnalyzer {
               await Promise.all(
                 plan.historySymbols.map(async (s) => [
                   s,
-                  await this.marketData.historical(s, { from: plan.range.from, to: plan.range.to, interval: tf.interval }),
+                  await fetchPartial(s, `historical:${tf.interval}`, () => this.marketData.historical(s, { from: plan.range.from, to: plan.range.to, interval: tf.interval }), []),
                 ]),
               ),
             );
@@ -266,6 +276,7 @@ export class RecursiveMarketAnalyzer {
       intent: plan.intent,
       program: plan.program.name,
       quotes,
+      dataErrors,
       metrics: sandboxResult.result,
       sampling: null,
       summary: null,
@@ -344,6 +355,10 @@ export class RecursiveMarketAnalyzer {
     }
 
     node.confidence = computeConfidence(node);
+    if (dataErrors.length) {
+      node.summary += `\n\nData unavailable: ${dataErrors.map((e) => `${e.symbol} ${e.operation}: ${e.error}`).join('; ')}`;
+      node.confidence *= Math.max(0.1, 1 - dataErrors.length / (plan.historySymbols.length * 3));
+    }
     return node;
   }
 

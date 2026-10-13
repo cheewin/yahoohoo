@@ -1,5 +1,6 @@
 import { TtlCache } from '../lib/cache.js';
 import { stableStringify } from '../lib/json.js';
+import { DataFetchError, RateLimitError } from '../lib/errors.js';
 
 function key(parts) {
   return stableStringify(parts, 0);
@@ -38,11 +39,11 @@ export class CoinGeckoData {
 
     if (res.status === 429) {
       this.logger.warn('CoinGecko rate limited');
-      return { _rateLimit: true };
+      throw new RateLimitError('CoinGecko rate limited. Retry after the provider cooldown.');
     }
     if (!res.ok) {
       this.logger.warn(`CoinGecko ${path} failed: ${res.status}`);
-      return null;
+      throw new DataFetchError(`CoinGecko ${path} failed: HTTP ${res.status}`);
     }
     return res.json();
   }
@@ -258,5 +259,6 @@ function compactMarketCoin(c) {
     ath_change_pct: c.ath_change_percentage ?? null,
     circulating_supply: c.circulating_supply ?? null,
     total_supply: c.total_supply ?? null,
+    last_updated: c.last_updated ?? null,
   };
 }

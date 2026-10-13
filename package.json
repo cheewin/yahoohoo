@@ -1,7 +1,7 @@
 {
   "name": "yahoohoo",
   "version": "0.2.0",
-  "description": "Yahoo Finance + CoinGecko MCP server with sandboxed recursive market analysis. Stocks, ETFs, options, and crypto — zero API keys required.",
+  "description": "Yahoo Finance + CoinGecko MCP server with sandboxed recursive market analysis. Stocks, ETFs, options, and crypto \u2014 zero API keys required.",
   "type": "module",
   "main": "src/index.js",
   "bin": {
@@ -19,7 +19,8 @@
     "check": "node -e \"const g=require('node:fs').globSync('src/**/*.js');for(const f of g){require('node:child_process').execFileSync(process.execPath,['--check',f],{stdio:'inherit'})}\"",
     "test": "node --test test/*.test.js test/**/*.test.js",
     "test:live": "YAHOOHOO_TEST_LIVE=1 node --test test/*.test.js test/**/*.test.js",
-    "smoke:sandbox": "python3 src/sandbox/runner.py examples/sandbox-payload.json"
+    "smoke:sandbox": "python3 src/sandbox/runner.py examples/sandbox-payload.json",
+    "smoke:http": "node scripts/smoke-http.mjs"
   },
   "keywords": [
     "mcp",
@@ -43,9 +44,9 @@
   },
   "license": "MIT",
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.27.1",
-    "express": "^5.1.0",
-    "yahoo-finance2": "^3.13.2",
+    "@modelcontextprotocol/sdk": "1.32.1",
+    "express": "5.3.0",
+    "yahoo-finance2": "4.0.3",
     "zod": "^4.3.6"
   },
   "engines": {

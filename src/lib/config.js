@@ -25,7 +25,7 @@ function envList(name, fallback = []) {
 export function loadConfig(overrides = {}) {
   const transport = overrides.transport || process.env.YAHOOHOO_TRANSPORT || 'stdio';
   const host = process.env.YAHOOHOO_HOST || '127.0.0.1';
-  const port = envInt('YAHOOHOO_PORT', 3434);
+  const port = envInt('YAHOOHOO_PORT', envInt('PORT', 3434));
 
   return {
     server: {
@@ -74,12 +74,16 @@ export function loadConfig(overrides = {}) {
     auth: {
       apiKeys: envList('YAHOOHOO_API_KEYS', []),
       rateLimitPerMinute: envInt('YAHOOHOO_RATE_LIMIT', 60),
+      publicUrl: process.env.YAHOOHOO_PUBLIC_URL || null,
+      ownerPassword: process.env.YAHOOHOO_OWNER_PASSWORD || null,
+      redirectUris: envList('YAHOOHOO_OAUTH_REDIRECT_URIS', ['https://chatgpt.com/connector_platform_oauth_redirect']),
     },
     shutdown: {
       drainTimeoutMs: envInt('YAHOOHOO_DRAIN_TIMEOUT_MS', 10_000),
     },
     sessions: {
       maxSessions: envInt('YAHOOHOO_MAX_SESSIONS', 50),
+      idleTtlMs: envInt('YAHOOHOO_SESSION_TTL_MS', 30 * 60_000),
     },
     crypto: {
       apiKey: process.env.COINGECKO_API_KEY || null,

@@ -20,6 +20,7 @@ function closeServer(server) {
 async function startServer() {
   const config = loadConfig({ transport: 'http' });
   config.server.host = '127.0.0.1';
+  config.auth.apiKeys = ['e2e-test-key'];
   const logger = createLogger('error');
   const { app, transports } = createHttpApp({ config, logger });
   const server = await new Promise((resolve) => {
@@ -32,7 +33,7 @@ async function startServer() {
 
 function rawRequest({ port, path, method = 'GET', headers = {}, body }) {
   return new Promise((resolve, reject) => {
-    const req = http.request({ host: '127.0.0.1', port, path, method, headers }, (res) => {
+    const req = http.request({ host: '127.0.0.1', port, path, method, headers: { Authorization: 'Bearer e2e-test-key', ...headers } }, (res) => {
       let data = '';
       res.setEncoding('utf-8');
       res.on('data', (chunk) => { data += chunk; });
@@ -190,7 +191,7 @@ describe('MCP end-to-end', () => {
       assert.ok(toolNames.includes('crypto_markets'));
       assert.ok(toolNames.includes('crypto_coin'));
       assert.ok(toolNames.includes('crypto_search'));
-      assert.equal(toolNames.length, 17);
+      assert.equal(toolNames.length, 21);
     });
 
     it('tools have valid input schemas', async () => {
