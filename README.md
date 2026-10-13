@@ -1,6 +1,6 @@
 # Yahoohoo
 
-Yahoohoo is an MCP server for market-data analysis. It uses Yahoo Finance for equities, ETFs, and options, CoinGecko for crypto data, and sandboxed Python for numerical computation. No API keys are required for the default setup.
+Yahoohoo is an MCP server for market-data analysis. It uses Yahoo Finance for equities, ETFs, and options, CoinGecko for crypto data, and sandboxed Python for numerical computation. Yahoo data does not require a provider key. Private remote HTTP requires OAuth or bearer authentication.
 
 It works with any MCP host, including Claude, Codex, ChatGPT, Cursor, and Windsurf. When the host supports MCP sampling, Yahoohoo can break larger requests into smaller analysis steps and synthesize the results. When it does not, Yahoohoo falls back to deterministic heuristics.
 
@@ -62,6 +62,10 @@ codex mcp add yahoohoo -- npx yahoohoo --transport stdio
 | `yahoo_quote` | Current quotes for up to 20 symbols |
 | `yahoo_historical` | OHLCV bars, or `summary=true` for computed stats |
 | `yahoo_quote_summary` | Fundamentals and company profile |
+| `yahoo_news` | Company-related news with publisher, links and publication timestamps |
+| `yahoo_income_statement` | All available annual/quarterly/trailing income statement line items |
+| `yahoo_balance_sheet` | All available balance sheet periods and line items |
+| `yahoo_cash_flow` | All available cash-flow periods and line items |
 | `yahoo_options` | Option chains with multi-expiry sweep |
 | `yahoo_screener` | day_gainers, day_losers, most_actives, and other predefined screens |
 | `yahoo_trending` | Trending symbols by region |
@@ -144,6 +148,8 @@ Pairwise:
 - [Architecture](docs/ARCHITECTURE.md) — three-layer design, data flow, and transport strategy
 - [Configuration](docs/CONFIG.md) — environment variables, HTTP mode, and deployment
 - [Security](docs/SECURITY.md) — sandbox threat model and limitations
+- [Railway Deployment](docs/DEPLOYMENT.md) — private Docker hosting, secrets, costs and verification
+- [Audit](docs/AUDIT.md) — dependencies, provider fidelity and remaining limitations
 - [ChatGPT Setup](docs/CHATGPT.md) — running in HTTP mode for remote hosts
 
 ## Caveats
@@ -157,11 +163,23 @@ Pairwise:
 
 ```bash
 npm run check         # syntax-check source files
-npm test              # 213 deterministic tests, no network
+npm test              # deterministic tests, no network
 npm run test:live     # includes live Yahoo Finance integration
 npm run smoke:sandbox # smoke test the Python sandbox
+npm run smoke:http    # authenticated functional smoke; token/URL in env
 ```
 
 ## License
 
 MIT
+
+## Private remote operation
+
+The Docker image serves Streamable HTTP at `/mcp` and fails closed without OAuth
+or bearer keys. Use the [browser-only Railway guide](docs/DEPLOYMENT.md) to deploy
+without installing anything locally, then follow the [ChatGPT Plugins guide](docs/CHATGPT.md).
+Keep one replica awake: restarting invalidates the in-memory OAuth registration
+and tokens, so reconnect/recreate the plugin after redeploy. Provider timestamps
+and exchange-delay metadata distinguish delayed/closed markets from fresh data.
+API errors are explicit; statements preserve every supplied line item and zero
+value, but Yahoo does not guarantee complete coverage.

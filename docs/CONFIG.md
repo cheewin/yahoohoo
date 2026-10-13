@@ -6,10 +6,14 @@ All configuration is via environment variables. No config files.
 |----------|---------|-------------|
 | `YAHOOHOO_TRANSPORT` | `stdio` | Transport mode: `stdio` or `http` |
 | `YAHOOHOO_HOST` | `127.0.0.1` | HTTP bind address |
-| `YAHOOHOO_PORT` | `3434` | HTTP port |
+| `YAHOOHOO_PORT` | `PORT` or `3434` | HTTP port |
 | `YAHOOHOO_ALLOWED_HOSTS` | `localhost,127.0.0.1` | Host header allow-list |
 | `YAHOOHOO_API_KEYS` | *(none)* | Comma-separated API keys for HTTP auth |
-| `YAHOOHOO_RATE_LIMIT` | `60` | Max requests per minute per IP |
+| `YAHOOHOO_PUBLIC_URL` | *(none)* | HTTPS origin for OAuth and discovery |
+| `YAHOOHOO_OWNER_PASSWORD` | *(none)* | Owner consent secret, at least 32 random characters |
+| `YAHOOHOO_OAUTH_REDIRECT_URIS` | ChatGPT stable callback | Exact callback allowlist; see ChatGPT guide |
+| `YAHOOHOO_SESSION_TTL_MS` | `1800000` | Idle session lifetime |
+| `YAHOOHOO_RATE_LIMIT` | `60` | Max requests per minute per authenticated principal |
 | `YAHOOHOO_MAX_SESSIONS` | `50` | Max concurrent MCP sessions |
 | `YAHOOHOO_DATA_PROVIDER` | `yahoo` | Market data provider |
 | `COINGECKO_API_KEY` | *(none)* | CoinGecko demo API key (optional, increases rate limit) |
@@ -35,6 +39,7 @@ All configuration is via environment variables. No config files.
 
 - **Streamable HTTP** at `POST /mcp` (initialize), `GET /mcp` (SSE), `DELETE /mcp` (close)
 - **Health endpoint** at `GET /health`
+- **OAuth** with DCR, S256 PKCE, owner consent, resource audience and issuer identification; ChatGPT-compatible. HTTP startup refuses missing authentication.
 - **API key auth** via `Authorization: Bearer <key>` when `YAHOOHOO_API_KEYS` is set
 - **Rate limiting** with `X-RateLimit-*` headers
 - **Session tracking** via `mcp-session-id` header
@@ -47,7 +52,10 @@ All configuration is via environment variables. No config files.
 docker compose up -d
 
 # Fly.io
-fly launch --config deploy/fly.toml && fly deploy
+fly launch --config deploy/fly.toml
+fly deploy --config deploy/fly.toml
 
-# Railway — import repo, point at deploy/railway.toml
+# Railway — import repository root; railway.toml selects Dockerfile and /health
 ```
+
+See [deployment](DEPLOYMENT.md) for required secrets/hosts, HTTPS checks, single-replica limitations and costs. Docker remote defaults disable sampling and CLI LLM calls.

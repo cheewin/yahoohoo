@@ -6,7 +6,7 @@ Yahoohoo intentionally avoids pretending that a subprocess-based Python runner i
 
 ### What Yahoohoo trusts
 
-- **The MCP host** is trusted. It supplies the reasoning layer and can invoke any tool. Yahoohoo does not authenticate or rate-limit the host connection itself.
+- **The MCP host** is trusted. It supplies the reasoning layer and can invoke any tool. Stdio trusts the local host. Remote HTTP requires OAuth or configured bearer keys and enforces rate limits; it never starts unauthenticated.
 - **yahoo-finance2** is trusted as a dependency. It makes network calls to Yahoo Finance on behalf of the Node process.
 - **The local Python runtime** is trusted. The sandbox restricts what user-generated code can do, but it runs inside the same Python interpreter.
 
@@ -55,5 +55,22 @@ For serious or multi-tenant use:
 ## HTTP transport security
 
 - The HTTP endpoint includes a host-header guard that rejects requests with unrecognized `Host` headers when listening on `0.0.0.0` or `::`.
-- There is no built-in authentication. Use a reverse proxy or network-level controls for access management.
-- A `/health` endpoint is available for readiness probes but does not expose sensitive information.
+- HTTP fails closed unless OAuth or API keys are configured. OAuth uses owner consent, PKCE, issuer identification, resource-scoped access tokens, and rotating refresh tokens. API keys require an Authorization Bearer header on every MCP method.
+- A `/health` endpoint is public for probes and exposes only server name, version, and status. Sessions and run contents are private. OAuth metadata, registration and the password-protected consent flow must be publicly reachable for ChatGPT authentication.
+
+## Private remote deployment
+
+See [audit findings](AUDIT.md) and [Railway deployment](DEPLOYMENT.md). Each MCP
+session belongs to one authenticated principal. Sessions idle out after 30 minutes,
+and only one analyze/drill request executes at a time. Secrets are supplied by
+hosting environment variables; never store them in the image, repository, URL
+query strings, or logs. OAuth state is bounded and in memory; restart invalidates
+registrations/tokens and requires reconnecting ChatGPT. Do not scale replicas or
+enable automatic sleep. For durable authorization, use a managed identity provider.
+
+Forwarded IPs are intentionally ignored, preventing client-spoofed rate-limit
+identities. The direct-peer perimeter budget can be shared by hosting-proxy users.
+The default remote image disables sampling and LLM CLI calls. Treat all news and
+provider content as untrusted input. Rotate the owner password/admin keys in hosting
+settings and redeploy to revoke sessions. No unauthenticated market-data endpoint
+is provided; `/health` and OAuth discovery are the only public operational data.

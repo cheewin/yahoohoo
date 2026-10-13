@@ -1,5 +1,10 @@
 .DS_Store
 .git
+.env
+.env.*
+*.pem
+*.key
+*.log
 .github
 node_modules
 npm-debug.log*

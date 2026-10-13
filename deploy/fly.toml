@@ -1,21 +1,23 @@
-app = "yahoohoo"
+app = "replace-with-your-unique-app-name"
 primary_region = "iad"
 
 [build]
-  dockerfile = "../Dockerfile"
+  dockerfile = "Dockerfile"
 
 [env]
   YAHOOHOO_TRANSPORT = "http"
   YAHOOHOO_HOST = "0.0.0.0"
   YAHOOHOO_PORT = "8080"
   YAHOOHOO_LOG_LEVEL = "info"
+  YAHOOHOO_ENABLE_SAMPLING = "false"
+  YAHOOHOO_LLM_QUERY = "false"
 
 [http_service]
   internal_port = 8080
   force_https = true
-  auto_stop_machines = "stop"
+  auto_stop_machines = "off"
   auto_start_machines = true
-  min_machines_running = 0
+  min_machines_running = 1
 
 [[http_service.checks]]
   grace_period = "10s"
@@ -26,4 +28,4 @@ primary_region = "iad"
 
 [[vm]]
   size = "shared-cpu-1x"
-  memory = "512mb"
+  memory = "1gb"

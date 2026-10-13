@@ -2,6 +2,7 @@ import YahooFinance from 'yahoo-finance2';
 import { TtlCache } from '../lib/cache.js';
 import { stableStringify } from '../lib/json.js';
 import { MarketDataProvider } from './base.js';
+import { DataFetchError } from '../lib/errors.js';
 
 function key(parts) {
   return stableStringify(parts, 0);
@@ -25,7 +26,12 @@ function compactQuote(quote) {
     regularMarketPrice: quote.regularMarketPrice ?? null,
     regularMarketChange: quote.regularMarketChange ?? null,
     regularMarketChangePercent: quote.regularMarketChangePercent ?? null,
-    regularMarketTime: quote.regularMarketTime ?? null,
+    regularMarketTime: normalizeDateTime(quote.regularMarketTime),
+    quoteType: quote.quoteType ?? null,
+    exchangeDataDelayedBy: quote.exchangeDataDelayedBy ?? null,
+    exchangeTimezoneName: quote.exchangeTimezoneName ?? null,
+    retrievedAt: new Date().toISOString(),
+    source: 'Yahoo Finance (unofficial)',
     marketState: quote.marketState ?? null,
     fiftyTwoWeekHigh: quote.fiftyTwoWeekHigh ?? null,
     fiftyTwoWeekLow: quote.fiftyTwoWeekLow ?? null,
@@ -72,20 +78,19 @@ function compactOptionContract(contract, fallbackExpiration) {
   };
 }
 
-function compactSummary(summary) {
+function compactSummary(summary, modules) {
   return {
     symbol: summary.symbol || summary.price?.symbol || null,
-    price: summary.price || null,
-    summaryDetail: summary.summaryDetail || null,
-    financialData: summary.financialData || null,
-    defaultKeyStatistics: summary.defaultKeyStatistics || null,
-    calendarEvents: summary.calendarEvents || null,
-    assetProfile: summary.assetProfile || null,
+    // Preserve every requested module, including ETF data and legacy statements.
+    ...Object.fromEntries(modules.map((name) => [name, summary[name] ?? null])),
+    retrievedAt: new Date().toISOString(),
+    source: 'Yahoo Finance (unofficial)',
   };
 }
 
 function compactSearch(result, limit = 10) {
-  const quotes = Array.isArray(result?.quotes) ? result.quotes : [];
+  const quotes = (Array.isArray(result?.quotes) ? result.quotes : [])
+    .filter((item) => item.isYahooFinance !== false && typeof item.symbol === 'string' && item.symbol.length);
   return quotes.slice(0, limit).map((item) => ({
     symbol: item.symbol,
     shortname: item.shortname || item.longname || item.name || null,
@@ -156,6 +161,8 @@ export class YahooMarketData extends MarketDataProvider {
     this.logger = logger;
     this.cache = new TtlCache(cacheTtlMs);
     this.yf = new YahooFinance({
+      queue: { concurrency: 2, interval: 250 },
+      fetch: (input, init) => fetch(input, { ...init, signal: AbortSignal.timeout(15_000) }),
       suppressNotices: ['yahooSurvey'],
       validation: {
         logErrors: false,
@@ -171,7 +178,7 @@ export class YahooMarketData extends MarketDataProvider {
         return compactSearch(result, limit);
       } catch (error) {
         this.logger.warn(`Yahoo search failed for "${query}":`, error.message);
-        return [];
+        throw new DataFetchError(`Yahoo search failed: ${error.message}`);
       }
     });
   }
@@ -192,7 +199,7 @@ export class YahooMarketData extends MarketDataProvider {
           entries.push([outcome.value.symbol || uniqueSymbols[i], outcome.value]);
         } else {
           this.logger.warn(`Yahoo quote failed for ${uniqueSymbols[i]}:`, outcome.reason?.message);
-          entries.push([uniqueSymbols[i], { symbol: uniqueSymbols[i], error: outcome.reason?.message || 'unknown error' }]);
+          entries.push([uniqueSymbols[i], { symbol: uniqueSymbols[i], error: outcome.reason?.message || 'unknown error', errorCode: 'DATA_FETCH_ERROR', retrievedAt: new Date().toISOString() }]);
         }
       }
       return Object.fromEntries(entries);
@@ -211,7 +218,7 @@ export class YahooMarketData extends MarketDataProvider {
         return (Array.isArray(result?.quotes) ? result.quotes : []).map(compactBar);
       } catch (error) {
         this.logger.warn(`Yahoo chart failed for ${symbol}:`, error.message);
-        return [];
+        throw new DataFetchError(`Yahoo history failed for ${symbol}: ${error.message}`);
       }
     });
   }
@@ -222,10 +229,10 @@ export class YahooMarketData extends MarketDataProvider {
         const result = await this.yf.quoteSummary(symbol, {
           modules,
         });
-        return compactSummary(result);
+        return compactSummary(result, modules);
       } catch (error) {
         this.logger.warn(`Yahoo quoteSummary failed for ${symbol}:`, error.message);
-        return {};
+        throw new DataFetchError(`Yahoo fundamentals failed for ${symbol}: ${error.message}`);
       }
     });
   }
@@ -237,7 +244,7 @@ export class YahooMarketData extends MarketDataProvider {
         return compactOptions(result);
       } catch (error) {
         this.logger.warn(`Yahoo options failed for ${symbol}:`, error.message);
-        return { underlyingSymbol: symbol, expirationDates: [], strikes: [], calls: [], puts: [], quote: null };
+        throw new DataFetchError(`Yahoo options failed for ${symbol}: ${error.message}`);
       }
     });
   }
@@ -250,7 +257,7 @@ export class YahooMarketData extends MarketDataProvider {
         return { total: result?.total ?? quotes.length, quotes: quotes.map(compactScreenerQuote) };
       } catch (error) {
         this.logger.warn(`Yahoo screener failed for "${screenId}":`, error.message);
-        return { total: 0, quotes: [] };
+        throw new DataFetchError(`Yahoo screener failed: ${error.message}`);
       }
     });
   }
@@ -262,7 +269,7 @@ export class YahooMarketData extends MarketDataProvider {
         return Array.isArray(result?.quotes) ? result.quotes.map((q) => q.symbol) : [];
       } catch (error) {
         this.logger.warn(`Yahoo trending failed for "${region}":`, error.message);
-        return [];
+        throw new DataFetchError(`Yahoo trending failed: ${error.message}`);
       }
     });
   }
@@ -274,8 +281,79 @@ export class YahooMarketData extends MarketDataProvider {
         return compactInsights(result);
       } catch (error) {
         this.logger.warn(`Yahoo insights failed for ${symbol}:`, error.message);
-        return { symbol, error: error.message };
+        throw new DataFetchError(`Yahoo insights failed for ${symbol}: ${error.message}`);
       }
     });
   }
+
+  async news(symbol, limit = 10) {
+    return this.cache.memo(key(['news', symbol, limit]), async () => {
+      try {
+        const result = await this.yf.search(symbol, { quotesCount: 0, newsCount: limit });
+        const articles = (result.news || []).slice(0, limit).map((article) => ({
+          id: article.uuid ?? null,
+          title: article.title ?? null,
+          publisher: article.publisher ?? null,
+          url: article.link ?? null,
+          publishedAt: normalizeDateTime(article.providerPublishTime),
+          relatedTickers: article.relatedTickers ?? [],
+        }));
+        return { symbol, articles, retrievedAt: new Date().toISOString(), source: 'Yahoo Finance search news',
+          relevance: 'Search matches; articles may discuss other companies. Related tickers are supplied when available.' };
+      } catch (error) {
+        throw new DataFetchError(`Yahoo news failed for ${symbol}: ${error.message}`);
+      }
+    });
+  }
+
+  async financialStatement(symbol, { statement, frequency, from, to }) {
+    return this.cache.memo(key(['statement', symbol, statement, frequency, from, to]), async () => {
+      try {
+        let raw;
+        const formatted = await this.yf.fundamentalsTimeSeries(symbol, {
+          module: statement, type: frequency, period1: from,
+          period2: normalizeInclusivePeriod2(to), padTimeSeries: false,
+        }, {
+          // The dependency's formatter drops zero values and currency metadata.
+          // Capture its supported fetch response before that lossy transform.
+          fetch: async (input, init) => {
+            const response = await fetch(input, { ...init, signal: AbortSignal.timeout(15_000) });
+            if (response.ok) raw = await response.clone().json();
+            return response;
+          },
+        });
+        const periods = raw ? normalizeStatements(raw, frequency) : formatted;
+        // Keep all provider line items. Missing fields are not inferred as zero.
+        return { symbol, statement, frequency, periods, retrievedAt: new Date().toISOString(),
+          source: 'Yahoo Finance fundamentals time series',
+          units: 'Provider reporting currency; absolute values except per-share values and ratios.',
+          availability: periods.length ? 'available' : 'no_data',
+          caveat: 'All returned line items are preserved. Coverage is provider-limited; ETFs, indices and crypto may have no corporate statements.' };
+      } catch (error) {
+        throw new DataFetchError(`Yahoo ${statement} failed for ${symbol}: ${error.message}`);
+      }
+    });
+  }
+}
+
+export function normalizeStatements(raw, frequency) {
+  if (raw?.timeseries?.error) throw new Error(raw.timeseries.error.description || 'Yahoo timeseries error');
+  if (!Array.isArray(raw?.timeseries?.result)) throw new Error('Unexpected Yahoo timeseries response');
+  const periods = new Map();
+  for (const series of raw.timeseries.result) {
+    for (const [name, items] of Object.entries(series)) {
+      if (!name.startsWith(frequency) || !Array.isArray(items)) continue;
+      for (const item of items) {
+        if (!item?.asOfDate) continue;
+        const date = item.asOfDate;
+        if (!periods.has(date)) periods.set(date, { date, periodType: item.periodType ?? null, lineItems: {} });
+        const period = periods.get(date);
+        const stripped = name.slice(frequency.length);
+        const field = stripped === stripped.toUpperCase() ? stripped : stripped[0].toLowerCase() + stripped.slice(1);
+        period[field] = item.reportedValue?.raw ?? null;
+        period.lineItems[field] = { ...item, value: item.reportedValue?.raw ?? null };
+      }
+    }
+  }
+  return [...periods.values()].sort((a, b) => a.date.localeCompare(b.date));
 }

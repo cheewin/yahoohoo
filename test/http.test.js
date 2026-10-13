@@ -24,7 +24,7 @@ async function startServer({ guardHost = '127.0.0.1', allowedHosts, apiKeys, rat
   const config = loadConfig({ transport: 'http' });
   config.server.host = guardHost;
   if (allowedHosts) config.server.allowedHosts = allowedHosts;
-  if (apiKeys) config.auth.apiKeys = apiKeys;
+  config.auth.apiKeys = apiKeys || ['test-default-key'];
   if (rateLimitPerMinute != null) config.auth.rateLimitPerMinute = rateLimitPerMinute;
   if (maxSessions != null) config.sessions.maxSessions = maxSessions;
 
@@ -52,7 +52,7 @@ function rawRequest({ port, path, method = 'GET', headers = {}, body }) {
         port,
         path,
         method,
-        headers,
+        headers: { Authorization: 'Bearer test-default-key', ...headers },
       },
       (res) => {
         let data = '';
@@ -88,7 +88,6 @@ describe('HTTP transport', () => {
       status: 'ok',
       server: 'yahoohoo',
       version: '0.2.0',
-      sessions: 0,
     });
   });
 
@@ -100,6 +99,7 @@ describe('HTTP transport', () => {
       headers: {
         accept: 'application/json, text/event-stream',
         'content-type': 'application/json',
+        Authorization: 'Bearer test-default-key',
       },
       body: JSON.stringify({
         jsonrpc: '2.0',
@@ -118,7 +118,7 @@ describe('HTTP transport', () => {
   it('rejects GET /mcp without a known session id', async () => {
     const { baseUrl } = await startServer();
 
-    const response = await fetch(`${baseUrl}/mcp`);
+    const response = await fetch(`${baseUrl}/mcp`, { headers: { Authorization: 'Bearer test-default-key' } });
     const body = await response.text();
 
     assert.equal(response.status, 400);
@@ -161,6 +161,7 @@ describe('HTTP transport', () => {
       headers: {
         accept: 'application/json, text/event-stream',
         'content-type': 'application/json',
+        Authorization: 'Bearer test-default-key',
       },
       body: JSON.stringify({
         jsonrpc: '2.0',
@@ -198,7 +199,7 @@ describe('HTTP transport', () => {
       port,
       path: '/mcp',
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
+      headers: { 'content-type': 'application/json', Authorization: '' },
       body: '{}',
     });
     assert.equal(noAuth.statusCode, 401);
@@ -294,6 +295,7 @@ describe('HTTP transport', () => {
       headers: {
         accept: 'application/json, text/event-stream',
         'content-type': 'application/json',
+        Authorization: 'Bearer test-default-key',
       },
       body: JSON.stringify({
         jsonrpc: '2.0',
@@ -316,6 +318,7 @@ describe('HTTP transport', () => {
       headers: {
         accept: 'application/json, text/event-stream',
         'content-type': 'application/json',
+        Authorization: 'Bearer test-default-key',
       },
       body: JSON.stringify({
         jsonrpc: '2.0',

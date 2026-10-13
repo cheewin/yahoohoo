@@ -5,6 +5,7 @@ import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js';
 import { createYahoohooServer } from './server.js';
 import { generateRequestId, startTimer } from './lib/logger.js';
 import { AuthError, RateLimitError, SessionLimitError, errorToJsonRpc } from './lib/errors.js';
+import { installOAuth, fingerprint, secretEqual } from './auth.js';
 
 const NodeHttpTransport =
   streamable.NodeStreamableHTTPServerTransport || streamable.StreamableHTTPServerTransport;
@@ -35,7 +36,7 @@ export function apiKeyAuth(config) {
     if (!keys.length) return next();
     if (req.path === '/health') return next();
 
-    const provided = req.headers.authorization?.replace(/^Bearer\s+/i, '') || '';
+    const provided = /^Bearer\s+(\S+)$/i.exec(req.headers.authorization || '')?.[1] || '';
     if (!provided) {
       const err = new AuthError('Missing Authorization header. Use: Bearer <api-key>', 401);
       res.status(err.httpStatus).json(err.toJSON());
@@ -47,6 +48,7 @@ export function apiKeyAuth(config) {
       res.status(err.httpStatus).json(err.toJSON());
       return;
     }
+    req.principal = `key:${fingerprint(provided)}`;
     next();
   };
 }
@@ -61,10 +63,15 @@ export function rateLimiter(config) {
   return (req, res, next) => {
     if (req.path === '/health') return next();
 
-    const clientKey = req.ip || 'unknown';
+    const clientKey = req.principal || req.ip || 'unknown';
     const now = Date.now();
+    for (const [key, value] of windows) if (now - value.start >= windowMs) windows.delete(key);
     let entry = windows.get(clientKey);
-    if (!entry || now - entry.start > windowMs) {
+    if (!entry || now - entry.start >= windowMs) {
+      if (windows.size >= 500) {
+        res.setHeader('Retry-After', '60');
+        return res.status(429).json({ error: 'RATE_LIMIT' });
+      }
       entry = { start: now, count: 0 };
       windows.set(clientKey, entry);
     }
@@ -74,6 +81,7 @@ export function rateLimiter(config) {
     res.setHeader('X-RateLimit-Remaining', String(Math.max(0, limit - entry.count)));
 
     if (entry.count > limit) {
+      res.setHeader('Retry-After', String(Math.max(1, Math.ceil((entry.start + windowMs - now) / 1000))));
       const err = new RateLimitError();
       res.status(err.httpStatus).json(err.toJSON());
       return;
@@ -104,37 +112,115 @@ export function createHttpApp({ config, logger }) {
     throw new Error('The installed MCP SDK does not expose a Streamable HTTP transport.');
   }
 
+  const oauthEnabled = Boolean(config.auth.publicUrl || config.auth.ownerPassword);
+  if (oauthEnabled) {
+    const url = new URL(config.auth.publicUrl);
+    if (url.protocol !== 'https:' || url.pathname !== '/' || url.search || url.hash || url.username || url.password) {
+      throw new Error('YAHOOHOO_PUBLIC_URL must be an HTTPS origin without credentials, path, query or fragment.');
+    }
+    if (!config.auth.ownerPassword || config.auth.ownerPassword.length < 32) throw new Error('Set YAHOOHOO_OWNER_PASSWORD to a random secret of at least 32 characters.');
+    for (const uri of config.auth.redirectUris) {
+      const callback = new URL(uri);
+      if (callback.protocol !== 'https:' || callback.username || callback.password || callback.hash) throw new Error('OAuth callback URLs must use HTTPS.');
+    }
+  }
+  if (!oauthEnabled && !config.auth.apiKeys.length) throw new Error('HTTP requires OAuth or YAHOOHOO_API_KEYS; unauthenticated HTTP is disabled.');
+  if (!Number.isInteger(config.auth.rateLimitPerMinute) || config.auth.rateLimitPerMinute <= 0) throw new Error('HTTP requires a positive rate limit.');
+  if (config.sessions.maxSessions <= 0 || config.sessions.idleTtlMs <= 0) throw new Error('HTTP requires bounded sessions and a positive idle TTL.');
+
   const app = express();
+  app.disable('x-powered-by');
+  app.set('trust proxy', false); // Never trust arbitrary forwarded IP or host headers.
   const transports = new Map();
+  const owners = new Map();
+  let initializing = 0;
+  let analyses = 0;
 
   app.use(requestLogger(logger));
-  app.use(express.json({ limit: '2mb' }));
   app.use(hostGuard(config));
-  app.use(apiKeyAuth(config));
+  app.use((req, res, next) => {
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    if (oauthEnabled) res.setHeader('Strict-Transport-Security', 'max-age=31536000');
+    next();
+  });
+  // One perimeter budget per direct peer; forwarded IPs are intentionally ignored.
+  app.use(rateLimiter({ auth: { rateLimitPerMinute: 120 } }));
+  app.use(express.json({ limit: '256kb' }));
+  const oauth = oauthEnabled ? installOAuth(app, config) : null;
+  app.use('/mcp', (req, res, next) => {
+    const token = /^Bearer\s+(\S+)$/i.exec(req.headers.authorization || '')?.[1];
+    if (token && config.auth.apiKeys.some((key) => secretEqual(token, key))) {
+      req.principal = `key:${fingerprint(token)}`;
+      return next();
+    }
+    if (!oauth) return apiKeyAuth(config)(req, res, next);
+    oauth.bearer(req, res, () => { req.principal = `oauth:${req.auth.clientId}`; next(); });
+  });
+  app.use('/mcp', (req, res, next) => {
+    if (req.headers.origin && (!oauthEnabled || req.headers.origin !== new URL(config.auth.publicUrl).origin)) {
+      return res.status(403).json({ error: 'Origin rejected.' });
+    }
+    next();
+  });
   app.use(rateLimiter(config));
+  app.post('/mcp', (req, res, next) => {
+    if (req.body?.method !== 'tools/call' || !['yahoohoo_analyze', 'yahoohoo_drill'].includes(req.body.params?.name)) return next();
+    if (analyses >= 1) {
+      res.setHeader('Retry-After', '5');
+      return res.status(429).json({ error: 'ANALYSIS_BUSY', message: 'One analysis is already running. Retry shortly.' });
+    }
+    analyses++;
+    // Hold the slot until execution finishes, even if the client disconnects.
+    req.releaseAnalysis = () => { analyses--; };
+    next();
+  });
+
+  const sessionFor = (req, res) => {
+    for (const [id, entry] of owners) {
+      if (Date.now() - entry.usedAt >= config.sessions.idleTtlMs) {
+        void transports.get(id)?.close().catch(() => {});
+        transports.delete(id); owners.delete(id);
+      }
+    }
+    const id = String(req.headers['mcp-session-id'] || '');
+    if (!id) return null;
+    const owner = owners.get(id);
+    if (!owner || owner.principal !== req.principal) {
+      res.status(404).json({ error: 'Unknown MCP session.' });
+      return null;
+    }
+    owner.usedAt = Date.now();
+    return transports.get(id);
+  };
 
   app.post('/mcp', async (req, res) => {
+    let newTransport;
+    let reserved = false;
     try {
-      const sessionId = req.headers['mcp-session-id'];
-      let transport = sessionId ? transports.get(String(sessionId)) : null;
+      let transport = sessionFor(req, res);
+      if (res.headersSent) return;
 
       if (!transport && isInitializeRequest(req.body)) {
         const maxSessions = config.sessions.maxSessions;
-        if (maxSessions > 0 && transports.size >= maxSessions) {
+        if (transports.size + initializing >= maxSessions) {
           const err = new SessionLimitError(maxSessions);
           res.status(err.httpStatus).json(errorToJsonRpc(err, req.body?.id ?? null));
           return;
         }
-
+        initializing++;
+        reserved = true;
         transport = new NodeHttpTransport({
+          enableJsonResponse: true,
           sessionIdGenerator: () => randomUUID(),
           onsessioninitialized: (id) => {
             transports.set(id, transport);
+            owners.set(id, { principal: req.principal, usedAt: Date.now() });
           },
         });
         transport.onclose = () => {
-          if (transport.sessionId) transports.delete(transport.sessionId);
+          if (transport.sessionId) { transports.delete(transport.sessionId); owners.delete(transport.sessionId); }
         };
+        newTransport = transport;
         const { server } = createYahoohooServer({ config, logger });
         await server.connect(transport);
       }
@@ -157,12 +243,16 @@ export function createHttpApp({ config, logger }) {
       logger.error('Yahoohoo HTTP request failed:', error instanceof Error ? error.message : String(error));
       const status = error.httpStatus || 500;
       res.status(status).json(errorToJsonRpc(error, req.body?.id ?? null));
+    } finally {
+      req.releaseAnalysis?.();
+      if (reserved) initializing--;
+      if (newTransport && !newTransport.sessionId) await newTransport.close();
     }
   });
 
   const sessionHandler = async (req, res) => {
-    const sessionId = String(req.headers['mcp-session-id'] || '');
-    const transport = transports.get(sessionId);
+    const transport = sessionFor(req, res);
+    if (res.headersSent) return;
     if (!transport) {
       res.status(400).send('Invalid or missing MCP session ID.');
       return;
@@ -178,11 +268,13 @@ export function createHttpApp({ config, logger }) {
       status: 'ok',
       server: config.server.name,
       version: config.server.version,
-      sessions: transports.size,
     });
   });
 
-  return { app, transports };
+  app.use((error, _req, res, _next) => {
+    if (!res.headersSent) res.status(error.status || 500).json({ error: 'Request rejected.' });
+  });
+  return { app, transports, oauth: oauth?.provider };
 }
 
 export function listenHttp({ config, logger }) {
@@ -192,11 +284,7 @@ export function listenHttp({ config, logger }) {
       `Yahoohoo HTTP transport listening at http://${config.server.host}:${config.server.port}/mcp`,
     );
     logger.info(`Health endpoint at http://${config.server.host}:${config.server.port}/health`);
-    if (config.auth.apiKeys.length) {
-      logger.info(`API key auth enabled (${config.auth.apiKeys.length} key(s)).`);
-    } else {
-      logger.warn('No API keys configured (YAHOOHOO_API_KEYS). HTTP mode is unauthenticated.');
-    }
+    logger.info('Private HTTP authentication enabled.');
   });
   return { app, server, transports };
 }

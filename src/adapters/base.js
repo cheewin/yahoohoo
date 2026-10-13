@@ -5,6 +5,13 @@
  * implement these five methods.
  */
 export class MarketDataProvider {
+  async news(_symbol, _limit = 10) {
+    throw new Error('news() not implemented');
+  }
+
+  async financialStatement(_symbol, _options) {
+    throw new Error('financialStatement() not implemented');
+  }
   /**
    * @param {string} query
    * @param {number} limit
